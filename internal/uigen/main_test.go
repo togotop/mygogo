@@ -15,9 +15,10 @@ func TestConvertArgCallbacks(t *testing.T) {
 		{"generic", "func(K) []K", "fn"},
 		{"variadic", "func(prefix string, values ...int) (int, error)", "fn"},
 		{"namedType", "InputHandler", "fn"},
-		{"context", "func(c *context)", "func(c *context) {fn(makeContext(c))}"},
-		{"node", "func(n *node)", "func(n *node) {fn(wrapElement(n))}"},
-		{"mixed", "func(c *context, n *node, i int) bool", "func(c *context,n *node,i int) bool {return fn(makeContext(c),wrapElement(n),i)}"},
+		// Adapted callbacks retain the fork's nil-preserving wrappers.
+		{"context", "func(c *context)", "func() func(c *context) { if fn == nil { return nil }; return func(c *context) {fn(makeContext(c))} }()"},
+		{"node", "func(n *node)", "func() func(n *node) { if fn == nil { return nil }; return func(n *node) {fn(wrapElement(n))} }()"},
+		{"mixed", "func(c *context, n *node, i int) bool", "func() func(c *context,n *node,i int) bool { if fn == nil { return nil }; return func(c *context,n *node,i int) bool {return fn(makeContext(c),wrapElement(n),i)} }()"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			fs := token.NewFileSet()

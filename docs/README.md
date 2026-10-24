@@ -103,6 +103,9 @@ What every app has, whether its windows show native UI or web pages.
   file lists, custom formats, lazy providers, and clipboard persistence.
 - [Audio](audio.md): sound effects, streamed music and sound an app makes
   itself, mixed in Go, with WAV, Ogg Vorbis and MP3.
+- [Video](video.md): the playback routes evaluated, and which one to take.
+- [Godot as the host](android-godot-poc.md): a game engine keeps the window and
+  MyGo runs the services — the contract, the lifecycle, storage and the risks.
 - [Launchers](launchers.md): apps in the manner of Spotlight and Raycast,
   summoned by a shortcut over every app, which find and open the apps
   installed.
@@ -133,6 +136,8 @@ components, from buttons to tables.
 - [GitHub Actions](github-actions.md): a workflow that builds, signs and
   notarizes the apps of every platform, and publishes them with their
   updates, when you push a tag.
+- [APNs push notifications](push.md): project configuration, one-command key
+  import, configured senders and iOS notification delivery.
 
 ## Official plugins
 

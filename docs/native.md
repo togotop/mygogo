@@ -344,6 +344,12 @@ awake. On Linux, `OnLockScreen` is called when the screen saver starts,
 which usually locks the screen, and `IdleTime` is 0 on desktops that do not
 report it.
 
+On iOS, `KeepAwake(reason, true)` prevents automatic screen dimming and locking
+while the scene is active. Release it when leaving the view that needs it.
+Overlapping requests remain effective until all are released. Inactive or
+background scenes restore automatic idle; a retained request resumes when
+the scene becomes active again. This does not grant background execution;
+`display=false` is a no-op on iOS.
 ## Network
 
 `mygo.Network` tells whether the computer is online and whether the

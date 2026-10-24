@@ -4,6 +4,7 @@ import (
 	"math"
 	"slices"
 
+	"github.com/egoist/mygo/internal/platform"
 	"github.com/egoist/mygo/internal/text"
 )
 
@@ -186,7 +187,7 @@ func (e *node) relative(cw, ch float32) (dx, dy float32) {
 func (e *node) textParams(width float32) text.Params {
 	ts := e.resolvedText()
 	style := text.Style{
-		Family: ts.family, Size: ts.size, Weight: ts.weight, Italic: ts.italic, LineHeight: ts.lineHeight,
+		Family: ts.family, Size: ts.size * platform.FontScale(), Weight: ts.weight, Italic: ts.italic, LineHeight: ts.lineHeight,
 		LetterSpacing: ts.spacing, Features: ts.features, Lang: ts.lang,
 	}
 	if ts.fixedLine && ts.lineHeight > 0 {

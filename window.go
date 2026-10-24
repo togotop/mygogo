@@ -136,6 +136,8 @@ type WindowOptions struct {
 	// a flash of another color while it loads. CSS syntax: "#1e1e1e",
 	// "#rgba", "rgb(30 30 30)", or "light-dark(#f5f5f7, #1e1e1e)" for a
 	// page that follows the light or dark appearance.
+	// On iOS it also fills the surrounding safe area. Without an explicit
+	// color, native UI's opaque root background fills that area automatically.
 	BackgroundColor string
 	// Vibrancy puts a translucent, blurred material behind a transparent
 	// page, or behind native UI where it draws no background (macOS and
@@ -264,7 +266,8 @@ type Window struct {
 	shown     bool
 	readyShow bool
 	// background is the BackgroundColor, if any. Main thread only.
-	background *background
+	background        *background
+	contentBackground *platform.Color // Last automatic mobile root fill; UI thread only.
 	// hiddenTitleBar is a TitleBarStyle that hides the title bar: the pages
 	// hear the room the window controls take. Main thread only.
 	hiddenTitleBar bool
@@ -313,6 +316,8 @@ type Window struct {
 	onShow             listeners[func()]
 	onHide             listeners[func()]
 	onReadyToShow      listeners[func()]
+	onFirstFrame       listeners[func()]
+	firstFrame         bool // UI thread only
 	onResize           listeners[func()]
 	onFileDrop         listeners[func(*FileDropEvent)]
 	onWillDownload     listeners[func(*DownloadEvent)]
@@ -637,11 +642,26 @@ func get[T any](w *Window, fn func(n platform.Window) T) T {
 }
 
 // Close closes the window as if the user clicked its close button, so
-// OnClose listeners can cancel it.
-func (w *Window) Close() { onMain(func() { w.close() }) }
+// OnClose listeners can cancel it. On iOS this does nothing;
+// TryClose reports ErrUnsupported.
+func (w *Window) Close() { _ = w.TryClose() }
+
+// TryClose is Close with an error for system-managed windows (iOS).
+func (w *Window) TryClose() error {
+	return onMainValue(func() error {
+		if backend().SystemManagedLifetime() {
+			return platform.ErrUnsupported
+		}
+		w.close()
+		return nil
+	})
+}
 
 // close runs on the main thread and reports whether the window was closed.
 func (w *Window) close() bool {
+	if backend().SystemManagedLifetime() {
+		return false
+	}
 	if w.native == nil {
 		return true
 	}
@@ -654,8 +674,15 @@ func (w *Window) close() bool {
 	return true
 }
 
-// Destroy closes the window without emitting OnClose.
-func (w *Window) Destroy() { onMain(w.destroy) }
+// Destroy closes the window without emitting OnClose. On iOS the system
+// owns the scene lifetime, so this method does nothing.
+func (w *Window) Destroy() {
+	onMain(func() {
+		if !backend().SystemManagedLifetime() {
+			w.destroy()
+		}
+	})
+}
 
 func (w *Window) destroy() {
 	if n := w.native; n != nil {
@@ -955,6 +982,7 @@ func (w *Window) IsAlwaysOnTop() bool { return get(w, platform.Window.IsAlwaysOn
 
 // SetBackgroundColor sets the color shown behind the page, in the syntax of
 // WindowOptions.BackgroundColor.
+// On iOS this also sets the safe-area background and updates status-bar contrast.
 func (w *Window) SetBackgroundColor(color string) error {
 	bg, err := parseBackground(color)
 	if err != nil {
@@ -1601,6 +1629,9 @@ func (w *Window) readyToShow() {
 type windowHandler struct{ w *Window }
 
 func (h *windowHandler) ShouldClose() bool {
+	if backend().SystemManagedLifetime() {
+		return false
+	}
 	e := &CloseEvent{Window: h.w}
 	fire1(&h.w.onClose, e)
 	if !e.prevented {
@@ -1694,6 +1725,23 @@ func (h *windowHandler) TitleBarChanged() {
 	h.w.sendTitleBar()
 	if c := h.w.conn; c != nil && c.TitleBarChanged != nil {
 		c.TitleBarChanged()
+	}
+}
+
+// SafeAreaChanged is called when the room the device's chrome takes
+// changes: a rotation, a soft keyboard, a fold, a window moved to another
+// display.
+//
+// 🔴 It does not send anything to a page the way TitleBarChanged sends the
+// room to a web view's, because nothing has to be told: package ui reads
+// the safe area from the window at the top of every frame (runtime.go),
+// and a frame is all this has to ask for. That is the cheaper half of the
+// pair and the one that cannot be missed — a page told through the bridge
+// can be a document that has not loaded yet, while a frame is drawn by
+// whichever content the window has.
+func (h *windowHandler) SafeAreaChanged() {
+	if c := h.w.conn; c != nil && c.SafeAreaChanged != nil {
+		c.SafeAreaChanged()
 	}
 }
 

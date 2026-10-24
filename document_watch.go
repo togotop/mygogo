@@ -96,9 +96,12 @@ func watchDocumentFile(ctx context.Context, path string) {
 			ids := []fileWatchGone{r.gone}
 			for _, b := range docs {
 				// A document in conflict read a file another replaced,
-				// whose identity a new file may have taken since.
+				// whose identity a new file may have taken since. A
+				// document marked deleted is not skipped: a disk check
+				// that ran between the rename and this notice is what
+				// marked it, and its file is the one that moved.
 				b.mu.Lock()
-				if !b.conflict && !b.deleted {
+				if !b.conflict {
 					ids = append(ids, b.stamp.file)
 				}
 				b.mu.Unlock()
@@ -216,6 +219,9 @@ func (b *docBase) checkDisk() {
 func (b *docBase) moved(path string) {
 	b.mu.Lock()
 	b.path = path
+	// The file is there, under another name: a check that ran between the
+	// rename and this notice may have marked it deleted.
+	b.deleted = false
 	b.mu.Unlock()
 	addRecent(path)
 	b.watch()

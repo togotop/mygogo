@@ -75,6 +75,15 @@ func (s Services) OpenURL(url string) {
 	}
 }
 
+// Blur clears keyboard focus and dismisses the software keyboard, as
+// Context.Blur does, from input handlers and accessory actions that run
+// outside a build pass. UI thread only.
+func (s Services) Blur() {
+	if rt := s.owner.Value(); rt != nil && !rt.closed {
+		rt.c.Blur()
+	}
+}
+
 // SafeToOpen reports whether a link to url can open in the system when
 // others wrote it, as a message, a language model's reply or a pasted
 // document: an http, https or mailto address. Other schemes and paths

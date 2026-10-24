@@ -40,6 +40,11 @@ func TestMain(m *testing.M) {
 		}
 		sig := make(chan os.Signal, 1)
 		signal.Notify(sig, syscall.SIGTERM)
+		if ready := os.Getenv("MYGO_FAKE_READY"); ready != "" {
+			if err := os.WriteFile(ready, nil, 0o600); err != nil {
+				os.Exit(2)
+			}
+		}
 		<-sig
 		os.Exit(0)
 	case "exit":
@@ -79,14 +84,18 @@ func TestDevLaunch(t *testing.T) {
 	s := &devSession{root: t.TempDir()}
 
 	t.Setenv("MYGO_FAKE_APP", "run")
+	ready := filepath.Join(s.root, "ready")
+	t.Setenv("MYGO_FAKE_READY", ready)
 	p, err := s.launch(os.Args[0])
 	if err != nil {
 		t.Fatal(err)
 	}
+	t.Cleanup(p.stop)
+	wait.Until(t, "the build installed its signal handler", func() bool { return fileExists(ready) })
 	select {
 	case <-p.done:
 		t.Fatalf("the build exited: %v", p.err)
-	case <-time.After(200 * time.Millisecond):
+	default:
 	}
 	p.stop()
 	if p.err != nil {

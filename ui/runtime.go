@@ -24,6 +24,7 @@ type host interface {
 	// windows cover it.
 	occluded() bool
 	present(s *scene.Scene)
+	firstFramePresented() bool
 	requestFrame()
 	// afterTimer and repaintTimer arm the timers of After and
 	// Painter.After for at, or stop them for the zero time.
@@ -60,6 +61,9 @@ type host interface {
 	// as its language reads.
 	rightToLeft() bool
 	titleBar() TitleBar
+	// safeArea returns the room the device's chrome takes from the
+	// content: a status bar, a notch, a home indicator. Zero on a desktop.
+	safeArea() SafeArea
 	// vibrancy reports whether the window shows a material where the
 	// frames are transparent.
 	vibrancy() bool
@@ -85,6 +89,9 @@ type host interface {
 // the view function, lays them out, paints them and routes input to the
 // elements of the last frame. Main thread only, except where noted.
 type engine struct {
+	// gestures are the pinch and rotation captures in progress, by the
+	// kind of gesture the surface named (gesture.go).
+	gestures map[string]gestureCapture
 	// inlineRects is placeInline's scratch, kept from frame to frame.
 	inlineRects []text.Rect
 	// byPosition holds the keys whose press stood for its physical key
@@ -244,6 +251,19 @@ type engine struct {
 	chain       []uint64
 	pressed     *state
 	pressButton int
+	touch       struct {
+		id                 uint64
+		active, scrolling  bool
+		keyboardTap        bool
+		selecting          bool
+		holdUntil          time.Time
+		scrollTarget       uint64
+		x, y, lastX, lastY float32
+		back               *Router
+		backEntry          *routeEntry
+		backWidth          float32
+		backLevel          int
+	}
 	// pressClicks is the press's count of clicks, which its release
 	// carries.
 	pressClicks int
@@ -316,6 +336,15 @@ type engine struct {
 	// skips none.
 	inkStale   bool
 	repaintDue time.Time
+	// wanted is set by whatever asks for a frame — an event, a view that
+	// changed, a timer coming due — and cleared when the frame that consumed
+	// it is drawn. A surface frame that arrives with it false and nothing
+	// moving is a frame nothing wants and is dropped (see surfaceFrame).
+	wanted bool
+	// paintedFrame tells that a frame has been drawn at least once: a window
+	// that has never painted must paint, whatever asked (see surfaceFrame).
+	paintedFrame bool
+	repaintTimer *time.Timer
 	// late is set when lists built elements while laying out.
 	late bool
 	// revealIDs are the elements to scroll into view once the frame is
@@ -327,8 +356,10 @@ type engine struct {
 	// ime is the text input state the host has, and base the rune of the
 	// focused editor its text starts at.
 	ime struct {
-		state platform.TextInputState
-		base  int
+		state             platform.TextInputState
+		base              int
+		compositionID     uint64
+		compositionLength int
 	}
 	// drag is the value being dragged within the window.
 	drag        *valueDrag
@@ -353,6 +384,13 @@ type engine struct {
 	access     bool
 	blinkStart time.Time
 	inFrame    bool
+	// repainted marks a frame that painted again without rebuilding, so
+	// endFrame can count it apart (a display shows those separately: they
+	// are cheap, and a run of them is why a rate can read low).
+	repainted bool
+	// frameStart is when the frame being run began, which endFrame reads
+	// into the diagnostics average (diagnostics.go).
+	frameStart time.Time
 	dark       bool
 	darkKnown  bool
 	// prefs are the desktop's preferences, read once until they change.
@@ -414,7 +452,7 @@ type labelNode struct {
 type hit struct {
 	st    *state
 	r     Rect
-	flags uint32
+	flags uint64
 }
 
 type shortcutReg struct {
@@ -482,6 +520,7 @@ func (rt *engine) runFrame() {
 		return
 	}
 	rt.inFrame = true
+	rt.frameStart = time.Now()
 	defer rt.endFrame()
 
 	rt.frame++
@@ -494,11 +533,17 @@ func (rt *engine) runFrame() {
 	appW := rt.insp.contentWidth(w)
 	rt.insp.lap(-1)
 	rt.c.titleBar = rt.host.titleBar()
+	// Read every frame like the title bar, and for a sharper reason: the
+	// safe area changes with the window (rotation, a soft keyboard, a
+	// fold), and a value cached at start-up would leave a page padded for
+	// the orientation it was built in.
+	rt.c.safeArea = rt.host.safeArea()
 	rt.c.vibrancy = rt.host.vibrancy()
 	rt.text.BeginFrame()
 	rt.gen = rt.text.Generation()
 	rt.painted = [3]float32{w, h, scale}
 	rt.animating, rt.repainting, rt.repaintAt = false, false, time.Time{}
+	rt.advanceTouch()
 	rt.routeKeys()
 	rt.glideWheels(now)
 	if rt.drag != nil {
@@ -584,6 +629,13 @@ func (rt *engine) runFrame() {
 	}
 	rt.stats.lap(phasePaint)
 	rt.insp.lap(2)
+	rt.insp.lap(2) // Count the ops before the scene is handed over, and before the next
+	// frame resets it: the count is of this frame's paint, and what the
+	// raster and present phases then cost is divided by it.
+	//
+	// upstream's frameStats counts its phases in end() and has no setOps:
+	// the op count this called with came from a diagnostics pass that is
+	// kept in ui/diagnostics.go, which reads the scene itself.
 	rt.host.present(&rt.scene)
 	rt.placeWebViews()
 	if rt.maxButton != rt.maxSent {
@@ -651,6 +703,9 @@ func (rt *engine) frameTime() time.Time {
 // (SurfaceShown) rather than draw frames nobody sees, as browsers pause
 // the animation frames of windows out of sight.
 func (rt *engine) next() {
+	if rt.touch.active && !rt.touch.holdUntil.IsZero() {
+		rt.scheduleAt(rt.touch.holdUntil)
+	}
 	rt.redraw, rt.repaintDue, rt.held = false, time.Time{}, false
 	moving := rt.animating || rt.repainting || !rt.repaintAt.IsZero()
 	switch {
@@ -685,6 +740,9 @@ func (rt *engine) repaintNow() {
 func (rt *engine) surfaceFrame() {
 	if rt.holdFrame() {
 		return
+	}
+	if rt.touch.active && !rt.touch.holdUntil.IsZero() && !rt.now().Before(rt.touch.holdUntil) {
+		rt.redraw = false // A long press changes widget state, not just paint.
 	}
 	if w, h, scale := rt.host.size(); rt.redraw && !rt.inFrame && rt.c.root != nil &&
 		rt.painted == [3]float32{w, h, scale} && rt.text.Generation() == rt.gen {
@@ -723,9 +781,11 @@ func (rt *engine) holdFrame() bool {
 // armed them.
 func (rt *engine) repaintFrame(w, h, scale float32) {
 	rt.inFrame = true
+	rt.repainted = true
+	rt.frameStart = time.Now()
 	defer rt.endFrame()
 	rt.stats.begin(rt)
-	start := time.Now()
+	start := rt.frameStart
 	rt.c.now = rt.frameTime()
 	rt.text.BeginFrame()
 	rt.repainting, rt.repaintAt = false, time.Time{}
@@ -741,6 +801,7 @@ func (rt *engine) repaintFrame(w, h, scale float32) {
 	rt.host.present(&rt.scene)
 	rt.stats.lap(phasePresent)
 	rt.text.EndFrame()
+	rt.updateTextInput()
 	rt.next()
 	rt.stats.end(rt)
 }
@@ -780,6 +841,7 @@ func (rt *engine) forgetInput() {
 		s.clicks, s.rightClicks, s.doubleClicks = 0, 0, 0
 		s.pressPending = false
 		s.dragX, s.dragY = 0, 0
+		s.gestures = nil
 		s.released = false
 		s.dropped = nil
 		s.droppedValue, s.hasDropped = nil, false
@@ -930,6 +992,8 @@ func (rt *engine) close() {
 // during it.
 func (rt *engine) endFrame() {
 	rt.inFrame = false
+	recordFrameTime(time.Since(rt.frameStart), rt.repainted)
+	rt.repainted = false
 	if rt.closing {
 		rt.close()
 	}
@@ -989,7 +1053,10 @@ func (rt *engine) commitElement(e *node, clip Rect, hidden bool) {
 	} else {
 		s.parent = 0
 	}
+	s.gestureEnabled = e.gestureEnabled
 	s.flags = e.flags
+	s.router = e.router
+	s.routerLevel = e.routerLevel
 	s.rtl = e.rtl()
 	s.anchor = 0
 	if e.popover != nil {
@@ -1003,7 +1070,18 @@ func (rt *engine) commitElement(e *node, clip Rect, hidden bool) {
 	s.cursor, s.tip = e.cursor, e.tip
 	s.webView = e.webView
 	s.role = e.role
+	// The element asks for gestures for this frame only, so an element that
+	// stops calling Gestures stops receiving: what is left in s.gestures is
+	// what this frame's build will read (gesture.go's updateGestures).
+	s.gestureEnabled = e.gestureEnabled
 	s.input, s.caret, s.takesText, s.noIME = e.inputFn, e.caret, e.takesText, e.noIME
+	s.caretFn = e.caretFn
+	s.textContext = e.textContext
+	s.inputOptions = e.inputOptions
+	s.inputAccessory, s.inputAction = e.inputAccessory, e.inputAction
+	s.inputModifiers, s.inputConsumed = e.inputModifiers, e.inputConsumed
+	s.touchScroll = e.touchScroll
+	s.touchSelection = e.touchSelection
 	s.copyData = e.copyData
 	if s.textClient != e.textClient {
 		if s.textAdapter != nil {

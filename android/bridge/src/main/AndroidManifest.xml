@@ -1,0 +1,73 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  桥自己的 manifest：宿主（含游戏引擎）合并这个 AAR 就得到这些组件，
+  不用再手抄一遍。Activity 不在这里 —— 那是宿主自己的。
+-->
+<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+
+    <!-- 前台服务（App.KeepRunning）与常驻通知。 -->
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_CONNECTED_DEVICE" />
+    <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
+    <uses-permission android:name="android.permission.SCHEDULE_EXACT_ALARM" />
+
+    <!-- 卡模拟。 -->
+    <uses-permission android:name="android.permission.NFC" />
+    <uses-feature android:name="android.hardware.nfc" android:required="false" />
+    <uses-feature android:name="android.hardware.nfc.hce" android:required="false" />
+
+    <application>
+        <!-- 通知被点击时的回传接收方。 -->
+        <receiver
+            android:name="org.mygo.MygoPlatform$NotificationReceiver"
+            android:exported="false" />
+
+        <!-- 定时通知到点：进程不在时由它把应用拉起并发出通知。 -->
+        <receiver
+            android:name="org.mygo.MygoPlatform$NotificationAlarmReceiver"
+            android:exported="false" />
+
+        <!-- 快捷设置磁贴。 -->
+        <service
+            android:name="org.mygo.MygoTileService"
+            android:exported="true"
+            android:icon="@drawable/mygo_tile"
+            android:label="MyGo"
+            android:permission="android.permission.BIND_QUICK_SETTINGS_TILE">
+            <intent-filter>
+                <action android:name="android.service.quicksettings.action.QS_TILE" />
+            </intent-filter>
+        </service>
+
+        <!-- 桌面小组件。 -->
+        <receiver
+            android:name="org.mygo.MygoWidgetProvider"
+            android:exported="false">
+            <intent-filter>
+                <action android:name="android.appwidget.action.APPWIDGET_UPDATE" />
+            </intent-filter>
+            <meta-data
+                android:name="android.appwidget.provider"
+                android:resource="@xml/mygo_widget_info" />
+        </receiver>
+
+        <!-- App.KeepRunning：前台服务。 -->
+        <service
+            android:name="org.mygo.MygoForegroundService"
+            android:exported="false"
+            android:foregroundServiceType="connectedDevice" />
+
+        <!-- 卡模拟：系统按 AID 绑定，绑定方必须持有 BIND_NFC_SERVICE。 -->
+        <service
+            android:name="org.mygo.MygoHostApduService"
+            android:exported="true"
+            android:permission="android.permission.BIND_NFC_SERVICE">
+            <intent-filter>
+                <action android:name="android.nfc.cardemulation.action.HOST_APDU_SERVICE" />
+            </intent-filter>
+            <meta-data
+                android:name="android.nfc.cardemulation.host_apdu_service"
+                android:resource="@xml/apduservice" />
+        </service>
+    </application>
+</manifest>

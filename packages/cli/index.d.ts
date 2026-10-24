@@ -106,10 +106,110 @@ export interface Config {
   updates?: UpdatesConfig;
   /** macOS packaging. */
   macos?: MacOSConfig;
+  /** iOS native UI packaging (requires macOS and Xcode). */
+  ios?: IOSConfig;
   /** Windows packaging. */
   windows?: WindowsConfig;
   /** Linux packaging. */
   linux?: LinuxConfig;
+}
+
+/** The UIKit host of a native UI application. */
+export interface IOSConfig {
+  backgroundTasks?: IOSBackgroundTaskConfig[];
+  /** Shared-container entitlements; each extension opts in separately. */
+  appGroups?: string[];
+  native?: IOSNativeConfig;
+  extensions?: IOSExtensionConfig[];
+  /** Opt into protected native APIs; disabled by default. Notifications and ordinary Keychain storage remain available. */
+  capabilities?: ("camera" | "microphone" | "geolocation" | "photos" | "biometrics" | "speech")[];
+  /** Enable APNs; generates aps-environment=development unless explicitly overridden. */
+  pushNotifications?: boolean;
+ /** CFBundleVersion, independent of the marketing version. */
+  buildNumber?: string;
+ /** Entitlement values, e.g. ["applinks:example.com"]. Requires a hosted AASA file. */
+  associatedDomains?: string[];
+ /** Signing capabilities, e.g. { "aps-environment": "development" }. */
+  entitlements?: Record<string, unknown>;
+
+  /** Static launch screen and matching overlay until the first Go frame. */
+  launchScreen?: IOSLaunchScreenConfig;
+  /** Oldest supported iOS version (default: "15.0"). */
+  minimumSystemVersion?: string;
+  /** Apple development team for automatic signing; unset builds unsigned. */
+  developmentTeam?: string;
+  /** Bundle keys, including permission descriptions. */
+  infoPlist?: Record<string, unknown>;
+  /** App/dependency privacy declarations merged with MyGo's required reasons. */
+  privacy?: IOSPrivacyConfig;
+  /** Automatic by default; manual signing requires identity and profile. */
+  signing?: IOSSigningConfig;
+}
+
+/** Opt-in native files copied into the exported, self-contained Xcode host. */
+export interface IOSNativeConfig {
+  sources?: string[];
+  resources?: string[];
+  /** Prebuilt static .a archives for the chosen SDK; linked with -force_load. */
+  libraries?: string[];
+  frameworks?: string[];
+  linkerFlags?: string[];
+  swiftConditions?: string[];
+  support?: ("actions" | "shared-store" | "widgets")[];
+  /** Replaces host main.m; unavailable on extension targets. */
+  entryPoint?: string;
+}
+
+export interface IOSExtensionConfig {
+  name: string;
+  bundleIdentifier?: string;
+  extensionPoint: string;
+  minimumSystemVersion?: string;
+  native?: IOSNativeConfig;
+  appGroups?: string[];
+  entitlements?: Record<string, unknown>;
+  infoPlist?: Record<string, unknown>;
+}
+
+export interface IOSPrivacyConfig {
+  tracking?: boolean;
+  trackingDomains?: string[];
+  collectedData?: IOSPrivacyData[];
+  accessedAPIs?: IOSPrivacyAPI[];
+  /** Paths to XML or binary PrivacyInfo.xcprivacy files to merge. */
+  manifests?: string[];
+}
+
+export interface IOSPrivacyAPI {
+  category: string;
+  reasons: string[];
+}
+
+export interface IOSPrivacyData {
+  type: string;
+  linked?: boolean;
+  tracking?: boolean;
+  purposes: string[];
+}
+
+export interface IOSSigningConfig {
+  style?: "automatic" | "manual";
+  identity?: string;
+  provisioningProfile?: string;
+  exportProfiles?: Record<string, string>;
+  exportCertificate?: string;
+}
+
+export interface IOSLaunchScreenConfig {
+  title?: string;
+  /** PNG path relative to the project. */
+  image?: string;
+  /** #RRGGBB; unset follows the system appearance. */
+  backgroundColor?: string;
+  /** #RRGGBB; unset follows the system appearance. */
+  foregroundColor?: string;
+  /** Overlay fade in milliseconds; default 0. Respects Reduce Motion. */
+  fadeDurationMs?: number;
 }
 
 /**
@@ -256,4 +356,13 @@ export interface LinuxConfig {
    * the app opens from the applications menu).
    */
   command?: string;
+}
+
+/** C-exported Go callbacks. A negative nextDelay disables scheduling. */
+export interface IOSBackgroundTaskConfig {
+  identifier: string;
+  prepare: string;
+  run: string;
+  cancel: string;
+  nextDelay: string;
 }

@@ -58,6 +58,29 @@ func (p *PowerModule) event(event string) {
 	}
 }
 
+// BatteryExempt reports whether the system lets the app run without its
+// background limits. Android asks the user for that exemption; platforms that
+// do not limit apps report true.
+func (p *PowerModule) BatteryExempt() (bool, error) {
+	needsApp("Power.BatteryExempt")
+	var (
+		exempt bool
+		err    error
+	)
+	onMain(func() { exempt, err = backend().Mobile().BatteryExempt() })
+	return exempt, err
+}
+
+// RequestBatteryExemption shows the system's own prompt for that exemption,
+// and returns once the prompt (or, on ROMs that refuse it, the settings list)
+// is up. The answer arrives through BatteryExempt after the user decides.
+func (p *PowerModule) RequestBatteryExemption() error {
+	needsApp("Power.RequestBatteryExemption")
+	var err error
+	onMain(func() { err = backend().Mobile().RequestBatteryExemption() })
+	return err
+}
+
 // KeepAwake keeps the computer from sleeping while idle, and with display
 // the display from turning off, e.g. during a long task or while a video
 // plays, until release is called:
@@ -66,6 +89,10 @@ func (p *PowerModule) event(event string) {
 //	defer release()
 //
 // The reason shows where the system lists what keeps it awake.
+// On iOS, display=true disables automatic screen idle only while the scene
+// is active. Overlapping requests are released independently; inactive scenes
+// restore automatic idle. This does not grant background execution, and
+// display=false is a no-op on iOS.
 func (p *PowerModule) KeepAwake(reason string, display bool) (release func()) {
 	needsApp("Power.KeepAwake")
 	var r func()

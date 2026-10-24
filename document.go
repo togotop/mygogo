@@ -686,6 +686,12 @@ func (b *docBase) persist() {
 
 // docWork tracks the writes of recovery copies that nothing waits for,
 // for tests.
+//
+// A wait must not overlap a write that starts once the counter has reached
+// zero: that is a wait group's rule, and breaking it is a data race in the
+// detector even when nothing reads the document. A window therefore queues
+// its write before it stops reporting a window (docBase.windowClosed), so
+// that waiting for Window() == nil is enough to know the queue has settled.
 var docWork sync.WaitGroup
 
 // untitledName returns the name of untitled document n, in the language

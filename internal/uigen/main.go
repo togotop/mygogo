@@ -349,7 +349,9 @@ func convertArg(fs *token.FileSet, t ast.Expr, name, c string) string {
 		if ft.Results != nil && len(ft.Results.List) > 0 {
 			ret = "return "
 		}
-		return "func(" + strings.Join(rawNames, ",") + ")" + sourceResults(fs, ft.Results) + " {" + ret + name + "(" + strings.Join(args, ",") + ")}"
+		// A nil callback stays nil: widgets test for it to skip optional work.
+		fn := "func(" + strings.Join(rawNames, ",") + ")" + sourceResults(fs, ft.Results)
+		return "func() " + fn + " { if " + name + " == nil { return nil }; return " + fn + " {" + ret + name + "(" + strings.Join(args, ",") + ")} }()"
 	}
 	if _, ok := t.(*ast.Ellipsis); ok {
 		return name + "..."
@@ -372,7 +374,7 @@ func sourceResults(fs *token.FileSet, r *ast.FieldList) string {
 	return " (" + strings.Join(v, ",") + ")"
 }
 
-var special = map[string]bool{"Element.Children": true, "Element.Key": true, "Element.Material": true, "Context.Invalidate": true, "List": true}
+var special = map[string]bool{"Element.Children": true, "Element.Key": true, "Element.Material": true, "Context.Invalidate": true, "Context.SafeArea": true, "List": true}
 
 // Public action queries must see bound edits on controls already built.
 // Keep this at the facade: private widget queries can run in constructors,
@@ -463,7 +465,7 @@ func generate(out *bytes.Buffer, fs *token.FileSet, fn *ast.FuncDecl) {
 	// A constructor, which builds controls in the frame of its context:
 	// their input applies as it returns (see ui/value_input.go).
 	constructor := false
-	if r == "" || r == "Router" || r == "Route" || r == "ListState" {
+	if r != "node" && r != "context" && publicPart(r) == "" {
 		frameParam := ""
 		if fn.Type.Params != nil {
 			for _, p := range fn.Type.Params.List {

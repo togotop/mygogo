@@ -78,6 +78,7 @@ func (v *Content) AttachContent(conn *surface.Conn) {
 	rt := newRuntime(v.view, h)
 	h.rt = rt
 	conn.Event = h.event
+	conn.TextGeometry = rt.textGeometry
 	conn.ThemeChanged = func() {
 		// The interface font is part of the appearance.
 		h.uiFont()
@@ -145,7 +146,9 @@ type windowHost struct {
 	detached         bool
 	// shown tells that a frame was presented, which makes the window
 	// ready to show.
-	shown bool
+	shown                               bool
+	firstFrameWatching, firstFrameShown bool
+	firstFrameOff                       func()
 	// placed is where the surface shows the window's web views, views
 	// the web views.
 	placed []platform.WebViewPlacement
@@ -171,6 +174,29 @@ type displayWaiter interface {
 	Ready(wake func()) bool
 }
 
+func (h *windowHost) firstFramePresented() bool {
+	if !h.firstFrameWatching {
+		h.firstFrameWatching = true
+		if h.conn.OnFirstFrame != nil {
+			h.firstFrameOff = h.conn.OnFirstFrame(func() {
+				if !h.detached {
+					h.firstFrameShown = true
+					h.rt.changed()
+				}
+			})
+		}
+	}
+	if h.conn.OnFirstFrame == nil {
+		// Custom surface connections without a presentation hook use the
+		// completed submit path, as non-drawable backends do.
+		if !h.shown {
+			h.requestFrame()
+		}
+		return h.shown
+	}
+	return h.firstFrameShown
+}
+
 func (h *windowHost) framePath() string {
 	if h.path == "drawn on the GPU" && h.gpu != nil {
 		// The stats logger calls this only while MYGO_FRAME_STATS is enabled.
@@ -189,6 +215,16 @@ var newGPU = newGPURenderer
 // event handles an event of the surface, noting when it asks for a frame:
 // only then may renderers draw (OpenGL's context is current only then).
 func (h *windowHost) event(ev platform.SurfaceEvent) bool {
+	if ev.Kind == platform.SurfaceMemoryPressure {
+		h.soft.Release()
+		if h.gpu != nil {
+			h.gpu.Release()
+			h.gpu = nil
+		}
+		h.gpuTried = false
+		h.rt.changed()
+		return false
+	}
 	if ev.Kind == platform.SurfaceRenew {
 		// The next frame makes the renderer again, for the surface's new
 		// native objects.
@@ -324,6 +360,16 @@ func (h *windowHost) present(s *scene.Scene) {
 		h.conn.Surface.RequestFrame()
 		return
 	}
+	if h.conn.ContentBackground != nil && h.rt.c.root != nil {
+		root := h.rt.c.root
+		c := root.bg
+		if c.A == 255 && root.fill == fillColor && (!root.opacitySet || root.opacity >= 1) {
+			h.conn.ContentBackground(platform.Color{R: c.R, G: c.G, B: c.B, A: c.A})
+		}
+	}
+	if h.conn.FrameSubmitted != nil {
+		defer h.conn.FrameSubmitted()
+	}
 	due := !h.retryAt.IsZero() && !time.Now().Before(h.retryAt)
 	switch {
 	case !h.gpuTried || h.gpu == nil && due:
@@ -339,14 +385,26 @@ func (h *windowHost) present(s *scene.Scene) {
 	h.armIdle(frameIdle)
 	h.useWide(s, now)
 	defer h.ready()
-	if h.render(s) {
-		h.path = "drawn on the GPU"
-		if h.degraded {
+	// The path is named on the way out, not on the way in: the frame
+	// statistics read it when the frame ends (framestats.go), and makeGPU —
+	// which decides the path — runs in here. Naming it before that made
+	// every frame's log name the path of the frame before it, so a window
+	// that had just started drawing on the GPU kept saying "drawn in
+	// memory" for a while, and the one honest line in the log was the one
+	// that was wrong.
+	defer func() {
+		switch {
+		case h.gpu != nil && h.onGPU && !h.degraded:
+			h.path = "drawn on the GPU"
+		case h.gpu != nil && h.onGPU:
 			h.path = "drawn by the GPU renderer in software"
+		default:
+			h.path = "drawn in memory"
 		}
+	}()
+	if h.render(s) {
 		return
 	}
-	h.path = "drawn in memory"
 	damage := h.soft.Render(s)
 	m := &h.soft.Image
 	if d, ok := h.conn.Surface.(platform.DamageSurface); ok {
@@ -488,6 +546,11 @@ func (h *windowHost) makeGPU() {
 		h.degraded = false
 	}
 	h.gpu, h.gpuSince = r, time.Now()
+	if s, ok := h.conn.Surface.(platform.DrawableSurface); ok {
+		if p, ok := r.(interface{ SetPresentationHook(func(uintptr)) }); ok {
+			p.SetPresentationHook(s.WatchDrawable)
+		}
+	}
 	h.wide = false // the renderer draws sRGB until told otherwise
 	if p, ok := r.(interface{ SetPost(func(func())) }); ok && h.conn.Post != nil {
 		// Frames waiting for the display draw through the main thread.
@@ -550,6 +613,10 @@ func (h *windowHost) capture() (int, int, []byte) {
 
 func (h *windowHost) detach() {
 	h.detached = true
+	if h.firstFrameOff != nil {
+		h.firstFrameOff()
+		h.firstFrameOff = nil
+	}
 	if h.idleTimer != nil {
 		h.idleTimer.Stop()
 	}
@@ -621,6 +688,11 @@ func (h *windowHost) uiFont() {
 func (h *windowHost) setCursor(c Cursor) { h.conn.Surface.SetCursor(platform.Cursor(c)) }
 
 func (h *windowHost) setTextInput(t platform.TextInputState) { h.conn.Surface.SetTextInput(t) }
+
+func (h *windowHost) nativeTextSelection() bool {
+	s, ok := h.conn.Surface.(platform.NativeTextSelectionSurface)
+	return ok && s.NativeTextSelection()
+}
 
 func (h *windowHost) updateAccessibility(tree *platform.AccessTree) {
 	h.conn.Surface.UpdateAccessibility(tree)
@@ -735,6 +807,19 @@ func (h *windowHost) titleBar() TitleBar {
 	return TitleBar{Height: float32(t.Height), Left: float32(t.Left), Right: float32(t.Right)}
 }
 
+func (h *windowHost) safeArea() SafeArea {
+	if h.conn.SafeArea == nil {
+		return SafeArea{}
+	}
+	a := h.conn.SafeArea()
+	return SafeArea{
+		Top:    float32(a.Top),
+		Right:  float32(a.Right),
+		Bottom: float32(a.Bottom),
+		Left:   float32(a.Left),
+	}
+}
+
 func (h *windowHost) vibrancy() bool {
 	s, ok := h.conn.Surface.(platform.MaterialSurface)
 	return ok && s.ShowsMaterial()
@@ -786,4 +871,9 @@ func (h *windowHost) popupMenu(m *platform.Menu, x, y float32, chosen func(int))
 	if h.conn.PopupMenu != nil {
 		h.conn.PopupMenu(m, float64(x), float64(y), chosen)
 	}
+}
+
+func (h *windowHost) snapshotTextInput() bool {
+	_, ok := h.conn.Surface.(platform.NativeTextSelectionSurface)
+	return ok
 }

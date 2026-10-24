@@ -85,7 +85,7 @@ const (
 
 // flags of an element.
 const (
-	flagClickable uint32 = 1 << iota
+	flagClickable uint64 = 1 << iota
 	flagFocusable
 	flagEditable
 	flagDragWindow
@@ -136,6 +136,8 @@ const (
 	// flagDividers marks an element drawing lines between its children,
 	// listed in Context.dividers.
 	flagDividers
+	// flagHideScrollbars suppresses scroll thumbs and their pointer targets.
+	flagHideScrollbars
 	// flagUnselectable excludes text from a surrounding Selectable container.
 	flagUnselectable
 
@@ -256,19 +258,26 @@ type layoutStyle struct {
 // Common input queries return false or zero for nil or cleared elements;
 // this does not make references to reused storage safe.
 type node struct {
-	epoch      uint64
-	key        any
-	valueInput func(*node)
-	c          *context
-	id         uint64
-	flags      uint32
-	parent     *node
-	first      *node
-	last       *node
-	next       *node
-	nchild     int
-	depth      int
-	st         *state
+	// gestureEnabled is set by Gestures: the element wants pinch and
+	// rotation updates, so the engine keeps routing a gesture to it after
+	// the fingers leave its box. Copied to the state each frame the element
+	// is built (see context.go's state.gestureEnabled).
+	gestureEnabled bool
+	router         *Router
+	routerLevel    int
+	epoch          uint64
+	key            any
+	valueInput     func(*node)
+	c              *context
+	id             uint64
+	flags          uint64
+	parent         *node
+	first          *node
+	last           *node
+	next           *node
+	nchild         int
+	depth          int
+	st             *state
 	// track is the ScrollState of a scroll container (TrackScroll).
 	track *ScrollState
 
@@ -332,12 +341,21 @@ type node struct {
 
 	// Input the element takes itself (HandleInput), and where the caret of
 	// the text it takes is (TextCaret).
-	inputFn    func(InputEvent) bool
-	textClient TextInputClient
-	caret      Rect
-	takesText  bool
-	noIME      bool // InputMethod(false)
-	copyData   func(parts []SelectedText) transfer.Data
+	inputFn        func(InputEvent) bool
+	caret          Rect
+	caretFn        func() Rect
+	textContext    func() (string, int)
+	takesText      bool
+	touchScroll    bool
+	touchSelection bool
+	inputOptions   InputOptions
+	inputAccessory string
+	inputAction    func(string)
+	inputModifiers Modifiers
+	inputConsumed  func()
+	textClient     TextInputClient
+	noIME          bool // InputMethod(false)
+	copyData       func(parts []SelectedText) transfer.Data
 
 	// Content.
 	spans    []Span // of a RichText
@@ -751,6 +769,12 @@ func (e *node) MarginY(v float32) *node { e.margin[0], e.margin[2] = v, v; retur
 //
 //	ui.Scroll(c).Fill().Padding(64, 16, 16).ScrollbarInsets(64, 0, 0)
 func (e *node) ScrollbarInsets(v ...float32) *node { e.barInset = edges(v); return e }
+
+// HideScrollbars hides both scroll bars and their pointer targets. Scrolling,
+// keyboard navigation, accessibility and tracked offsets remain available.
+// Apply to Scroll, ScrollHorizontal, ScrollBoth, List, GridView or TextArea
+// each frame.
+func (e *node) HideScrollbars() *node { e.flags |= flagHideScrollbars; return e }
 
 // Width sets the width in DIPs.
 func (e *node) Width(v float32) *node { e.width = px(v); return e }

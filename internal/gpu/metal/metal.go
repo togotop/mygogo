@@ -400,6 +400,7 @@ type formatState struct {
 
 // Renderer draws scenes into a CAMetalLayer it adds to a view's layer.
 type Renderer struct {
+	presentationHook       func(uintptr)
 	device, queue, sampler id
 	// shaderBytes holds the uniforms of the shader being drawn, laid out.
 	shaderBytes []byte
@@ -490,6 +491,10 @@ type Renderer struct {
 	drawState
 }
 
+// SetPresentationHook observes a drawable before it is presented. The hook
+// must arrange an asynchronous native callback, without retaining Go memory.
+func (r *Renderer) SetPresentationHook(fn func(uintptr)) { r.presentationHook = fn }
+
 // New creates a renderer drawing into a CAMetalLayer that it adds to
 // layer, the layer of a view, and sizes as it.
 func New(layer uintptr) (r *Renderer, err error) {
@@ -506,7 +511,7 @@ func New(layer uintptr) (r *Renderer, err error) {
 		}
 		ml := send(send(class("CAMetalLayer"), "alloc"), "init")
 		if err = need(ml, "CAMetalLayer", "setDevice:", "setPixelFormat:", "setFramebufferOnly:", "setPresentsWithTransaction:",
-			"setColorspace:", "setDrawableSize:", "setContentsScale:", "setFrame:", "setAutoresizingMask:", "nextDrawable"); err != nil {
+			"setColorspace:", "setDrawableSize:", "setContentsScale:", "setFrame:", "nextDrawable"); err != nil {
 			release(&ml)
 			return
 		}
@@ -523,13 +528,18 @@ func New(layer uintptr) (r *Renderer, err error) {
 		if respondsTo(ml, "setMaximumDrawableCount:") {
 			send(ml, "setMaximumDrawableCount:", 3)
 		}
-		// The first frame shows with the window's other changes; render
-		// decides for each frame.
-		send(ml, "setPresentsWithTransaction:", 1)
-		r.synced = true
+		// Desktop layer changes present in the window transaction. iOS
+		// keeps asynchronous presentation and its default three drawables.
+		if runtime.GOOS != "ios" {
+			send(ml, "setPresentsWithTransaction:", 1)
+			r.synced = true
+		}
 		send(ml, "setColorspace:", srgb)
 		send(ml, "setOpaque:", 0)
-		send(ml, "setAutoresizingMask:", layerWidthSizable|layerHeightSizable)
+		// CALayer's autoresizingMask is a macOS API. fit sizes each iOS frame.
+		if runtime.GOOS != "ios" {
+			send(ml, "setAutoresizingMask:", layerWidthSizable|layerHeightSizable)
+		}
 		send(layer, "addSublayer:", ml)
 		r.layer, r.superlayer = ml, layer
 	})
@@ -883,6 +893,10 @@ func (r *Renderer) passPipeline(lib id, name string, format uint) (id, error) {
 // time, or 0 when it was compiled from another shader.metal (go generate
 // was not run since it changed) or Metal cannot load it.
 func (r *Renderer) compiledLibrary() id {
+	// The embedded metallib targets macOS. iOS compiles the shared shader source.
+	if runtime.GOOS == "ios" {
+		return 0
+	}
 	if gpu.SourceSum(shaderSource) != shaderLibrarySum {
 		return 0
 	}
@@ -917,7 +931,7 @@ func (r *Renderer) newTexture(w, h int, format, usage uint, pix []byte, stride i
 		return 0
 	}
 	send(desc, "setUsage:", uintptr(usage))
-	if usage&usageRenderTarget != 0 {
+	if usage&usageRenderTarget != 0 && runtime.GOOS != "ios" {
 		send(desc, "setStorageMode:", storageManaged)
 	}
 	tex := send(r.device, "newTextureWithDescriptor:", desc)
@@ -1606,7 +1620,7 @@ func (r *Renderer) render(s *scene.Scene) error {
 	// Others present as soon as the GPU has them, sparing a commit of the
 	// transaction for each.
 	holes := hasHoles(s)
-	sync := changed || holes || r.holes
+	sync := runtime.GOOS != "ios" && (changed || holes || r.holes)
 	r.holes = holes
 	if sync {
 		// A drawable fetched before the layer changed, or to present
@@ -1659,6 +1673,9 @@ func (r *Renderer) render(s *scene.Scene) error {
 		send(cb, "commit")
 		r.track(cb)
 		return nil
+	}
+	if r.presentationHook != nil {
+		r.presentationHook(drawable)
 	}
 	if sync {
 		send(cb, "commit")

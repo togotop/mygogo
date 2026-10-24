@@ -581,6 +581,10 @@ func TestDocumentFollowsReplacedRename(t *testing.T) {
 	if err := os.Rename(path, renamed); err != nil {
 		t.Fatal(err)
 	}
+	// A look between the rename and the watch's notice finds the old path
+	// gone and marks the document deleted; following the rename has to work
+	// anyway, and leave it not deleted.
+	d.checkDisk()
 	for _, target := range watch.Targets() {
 		if target.Path == filepath.Dir(path) {
 			watch.Notify(platform.FileWatchNotice{Target: target.ID, Name: "doc.txt", Kind: platform.FileWatchRemove})

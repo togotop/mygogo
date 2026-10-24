@@ -1,0 +1,6 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- 卡模拟（HCE）的说明文字：系统在「默认支付应用」一类的界面里显示。 -->
+    <string name="mygo_hce_description">mygo 卡模拟</string>
+    <string name="mygo_hce_aids">mygo 应用标识</string>
+</resources>

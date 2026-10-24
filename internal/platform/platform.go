@@ -25,6 +25,13 @@ type unsupportedError struct{}
 func (unsupportedError) Error() string        { return "not supported on this platform" }
 func (unsupportedError) Is(target error) bool { return target == errors.ErrUnsupported }
 
+// ApplicationHost is implemented when the OS owns the application loop.
+// RunApplication calls start and finish on the UI thread and waits off that
+// thread for shutdown. start initializes the backend; Ready follows it.
+type ApplicationHost interface {
+	RunApplication(start func() error, finish func()) error
+}
+
 // ErrNotificationsDenied is what ShowNotification fails with when the user
 // does not allow the app to show notifications.
 var ErrNotificationsDenied = errors.New("mygo: the user does not allow notifications")
@@ -44,6 +51,20 @@ type Rect struct{ X, Y, Width, Height int }
 // top edge, Left wide from the left edge and Right wide from the right.
 type TitleBar struct{ Height, Left, Right int }
 
+// SafeArea is the room the system's own chrome takes from a window's
+// content, in DIPs: a status bar or a notch at the top, a home indicator
+// or a gesture bar at the bottom, and a rounded corner or a camera cutout
+// at either side.
+//
+// It is the phone's TitleBar, and it is a different question: a TitleBar is
+// the controls of *this* window, which an app can hide; a SafeArea is the
+// device's, which an app draws under and must keep clear of.
+//
+// A desktop window has none of them — there the system draws outside the
+// content — so every field is 0 and content laid out at the window's edge
+// is correct.
+type SafeArea struct{ Top, Right, Bottom, Left int }
+
 // Color is an 8-bit RGBA color.
 type Color struct{ R, G, B, A uint8 }
 
@@ -51,6 +72,9 @@ type Color struct{ R, G, B, A uint8 }
 type Backend interface {
 	// Name identifies the backend, for example "darwin/wkwebview".
 	Name() string
+	// SystemManagedLifetime is true when the OS owns closing and quitting.
+	// This capability may be read before Init and from any goroutine.
+	SystemManagedLifetime() bool
 
 	// Init prepares the native application. It is called once, on the main
 	// thread, before Run.
@@ -86,6 +110,12 @@ type Backend interface {
 
 	App() AppController
 	Dialogs() Dialogs
+	Sharing() Sharing
+	Permissions() Permissions
+	SecureStorage() SecureStorage
+	Speech() SpeechRecognizer
+	Authenticator() Authenticator
+	Mobile() Mobile
 	Clipboard() Clipboard
 	Shell() Shell
 	Screen() Screen
@@ -156,6 +186,8 @@ type AppHandler interface {
 	Activated(hasVisibleWindows bool)
 	DidBecomeActive()
 	DidResignActive()
+	DidEnterBackground()
+	WillEnterForeground()
 	OpenURLs(urls []string)
 	OpenFiles(paths []string)
 	MenuItemClicked(id int)
@@ -482,6 +514,13 @@ type Window interface {
 	// changes of. It is zero for other windows and while the controls are
 	// hidden, in full screen.
 	TitleBar() TitleBar
+	// SafeArea returns the room the device's own chrome takes from the
+	// content: the status bar, a notch, the home indicator, a rounded
+	// corner. It is zero on a desktop, where the system draws outside the
+	// window; on a phone it is what content must keep clear of, and
+	// WindowHandler.SafeAreaChanged reports changes of it (a rotation, a
+	// keyboard showing, a fold).
+	SafeArea() SafeArea
 	// StartDrag moves the window with the mouse (frameless drag regions).
 	StartDrag()
 	// TitleBarDoubleClicked performs the platform action for a double click
@@ -617,6 +656,10 @@ type WindowHandler interface {
 	// TitleBarChanged is called when Window.TitleBar changes, e.g. when the
 	// window enters full screen or the desktop's button layout changes.
 	TitleBarChanged()
+	// SafeAreaChanged is called when Window.SafeArea changes: the device
+	// rotated, a keyboard came up or went away, or the window moved to
+	// another display.
+	SafeAreaChanged()
 
 	// Message delivers a message posted by the renderer bridge.
 	Message(msg string)
@@ -788,15 +831,17 @@ type SaveDialogOptions struct {
 // MessageBoxOptions configures a message box.
 type MessageBoxOptions struct {
 	// Type is "none", "info", "error", "question" or "warning".
-	Type            string
-	Title           string
-	Message         string
-	Detail          string
-	Buttons         []string
-	DefaultID       int
-	CancelID        int
-	CheckboxLabel   string
-	CheckboxChecked bool
+	Type               string
+	Title              string
+	Message            string
+	Detail             string
+	Buttons            []string
+	DefaultID          int
+	CancelID           int
+	CheckboxLabel      string
+	CheckboxChecked    bool
+	Style              string
+	DestructiveButtons []int
 }
 
 // MessageBoxResult is the outcome of a message box.
@@ -810,6 +855,8 @@ type MessageBoxResult struct {
 type Dialogs interface {
 	ShowOpenDialog(parent Window, opts *OpenDialogOptions, cb func(paths []string, err error))
 	ShowSaveDialog(parent Window, opts *SaveDialogOptions, cb func(path string, err error))
+	ShowExportDialog(parent Window, opts *ExportDialogOptions, cb func(completed bool, err error))
+	ShowPhotoDialog(parent Window, opts *PhotoDialogOptions, cb func(paths []string, err error))
 	ShowMessageBox(parent Window, opts *MessageBoxOptions, cb func(res MessageBoxResult, err error))
 }
 
@@ -960,9 +1007,144 @@ type Network interface {
 	Status() NetworkStatus
 }
 
+// ProxyProvider is implemented by backends whose system has an HTTP proxy
+// configured for the app. Raw dials do not go through one; an app that speaks
+// HTTP, or a protocol with CONNECT, asks for it here.
+type ProxyProvider interface {
+	// Proxy returns the proxy in force, or the zero value for a direct
+	// connection.
+	Proxy() ProxyInfo
+}
+
+// ProxyInfo is an HTTP proxy the system has configured.
+type ProxyInfo struct {
+	Host string
+	Port int
+}
+
+// MemoryWarner is an AppHandler that hears about memory pressure, as Android
+// reports it through onTrimMemory. Levels are Android's: 5 running low, 10
+// background, 15 foreground, 20 visible, 40 moderate, 60 complete, 80
+// background complete, 100 UI hidden.
+type MemoryWarner interface {
+	MemoryWarning(level int)
+}
+
+// Headless is a backend whose host owns the window: the app runs, but no
+// window can be created for it, as when a game engine embeds MyGo as a
+// service layer. Backends that can make windows do not implement it.
+type Headless interface {
+	Headless() bool
+}
+
+// NetworkWifi is what local discovery needs from a phone: a multicast lock and
+// the name of the Wi-Fi network the device is on. Desktop backends already
+// deliver multicast packets and do not implement it.
+type NetworkWifi interface {
+	// Multicast keeps the Wi-Fi stack delivering multicast packets while on.
+	// Leases are the caller's business: it turns the switch off when done.
+	Multicast(on bool) error
+	// Wifi names the current network. Fields are empty when the system hides
+	// them: no Wi-Fi, or a permission the app does not have.
+	Wifi() WifiInfo
+}
+
+// WifiInfo names the Wi-Fi network the device is on.
+type WifiInfo struct {
+	SSID      string
+	BSSID     string
+	Connected bool
+}
+
+// AudioVolumeInfo is a phone's media volume: how loud, whether it is muted,
+// and the ringer mode ("normal", "vibrate" or "silent").
+type AudioVolumeInfo struct {
+	Percent int    `json:"percent"`
+	Muted   bool   `json:"muted"`
+	Ringer  string `json:"ringer"`
+}
+
+// ErrDndAccess is the system refusing to silence the ringer: Android 6 and
+// later require the notification policy (do not disturb) access for that, and
+// it is granted on a settings page, not by a dialog.
+var ErrDndAccess = errors.New("mygo: silent mode needs the do not disturb access")
+
+// AudioControl is a phone's media volume and transport keys. Desktop backends
+// do not implement it: the volume there belongs to whatever is playing, and
+// the transport keys to that application.
+type AudioControl interface {
+	// Volume reports the media stream.
+	Volume() (AudioVolumeInfo, error)
+	// SetVolume sets, mutes or steps it, from the JSON the caller builds.
+	SetVolume(json string) error
+	// MediaKey sends one transport key.
+	MediaKey(json string) error
+	// RingerMode sets "normal", "vibrate" or "silent"; ErrDndAccess means
+	// the last one needs the notification policy access.
+	RingerMode(json string) error
+	// SilenceAllowed reports whether silent is permitted yet.
+	SilenceAllowed() bool
+	// OpenSilenceSettings shows the page that grants it.
+	OpenSilenceSettings() error
+}
+
+// NFCReader is a phone's NFC reader: tags held against it appear as events.
+// Desktop backends do not implement it.
+type NFCReader interface {
+	// NFCAvailable reports whether the device has an adapter, which is not
+	// the same as it being switched on.
+	NFCAvailable() bool
+	// NFCScanStart enables the foreground reader: 0 started, 2 no NFC or
+	// it is off, 3 failed. NFCScanStop disables it.
+	NFCScanStart() int
+	NFCScanStop() int
+	// TakeNFCEvent pulls one queued tag as JSON.
+	TakeNFCEvent() (json string, ok bool)
+	// NFCWriteText writes one text record to the tag in the field: 0
+	// written, 2 no NFC, 3 failed, 4 read-only.
+	NFCWriteText(json string) int
+	// Transceive sends one raw command to the tag in the field, for tags
+	// that speak something other than NDEF, and returns {"data":"…"}.
+	Transceive(payload string) (answer string, ok bool)
+	// HCEStart turns on card emulation for the AIDs in json (0 started, 2
+	// no NFC, 3 failed), HCEStop turns it off; TakeHCERequest pulls one
+	// waiting APDU as JSON and HCERespond hands the answer back.
+	HCEStart(json string) int
+	HCEStop() int
+	TakeHCERequest() (json string, ok bool)
+	HCERespond(json string) int
+}
+
+// WifiScanner is a phone that can list nearby networks and join one, which is
+// how an app onboards a device that broadcasts its own access point. Desktop
+// backends do not implement it: joining a network is the user's business
+// there.
+type WifiScanner interface {
+	// ScanWifi starts a scan: 0 started, 1 no permission, 2 no Wi-Fi, 3
+	// failed (the system throttles scans, which lands here). Results come
+	// off TakeWifiScanEvent as {"kind":"networks",…} or {"kind":"error",…}.
+	ScanWifi() int
+	// TakeWifiScanEvent pulls one queued event, as JSON.
+	TakeWifiScanEvent() (json string, ok bool)
+	// JoinWifi joins the network in json {"ssid","password","security"} and
+	// routes this process through it: 0 accepted, 1 no permission, 3
+	// failed. The outcome is a {"kind":"joined"} or {"kind":"join-failed"}
+	// event.
+	JoinWifi(json string) int
+	// LeaveWifi drops the joined network and restores the default route.
+	LeaveWifi() int
+}
+
 // ErrSecretNotFound is what Secrets.Secret fails with when the store has
 // no secret for the service and account.
 var ErrSecretNotFound = errors.New("mygo: secret not found")
+
+// ErrSpeechStarting is the speech engine not being ready yet: it starts in the
+// background, and a second call a moment later works.
+var ErrSpeechStarting = errors.New("mygo: the speech engine is still starting")
+
+// ErrPermissionDenied is the app not holding a permission the call needs.
+var ErrPermissionDenied = errors.New("mygo: permission not granted")
 
 // Secrets keeps small secrets in the system's credential store: the
 // Keychain on macOS, the Secret Service on Linux (through libsecret) and
@@ -1004,17 +1186,33 @@ type Tray interface {
 	Destroy()
 }
 
-// Notification is a desktop notification.
+// Notification is a system notification.
 type Notification struct {
 	ID       string
 	Title    string
 	Subtitle string
 	Body     string
 	Silent   bool
+	// Urgent asks for the alert channel, where the platform has channels.
+	Urgent bool
+	// Progress draws a determinate bar from 0 to 1; nil leaves it out.
+	Progress *float64
+	// Actions are buttons shown with the notification, in order.
+	Actions []NotificationAction
 	// Group gathers the notifications that share it (threadIdentifier on
 	// macOS).
-	Group  string
-	Sender *NotificationSender
+	Group string
+	// DelaySeconds is a one-shot local trigger; zero delivers immediately.
+	DelaySeconds float64
+	Badge        *int
+	Data         map[string]string
+	Sender       *NotificationSender
+}
+
+// NotificationAction is a button on a notification.
+type NotificationAction struct {
+	ID    string
+	Label string
 }
 
 // NotificationSender describes an incoming direct message's sender.

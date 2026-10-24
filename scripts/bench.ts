@@ -119,35 +119,37 @@ async function run(args: string[]): Promise<void> {
   if (test.code !== 0 || measured.failed) process.exit(1);
 }
 
-/**
- * Returns the directories of the packages that have benchmarks on this
- * platform: those of internal/gpu/metal, say, only build on macOS.
- */
-async function benchmarkPackages(e2e: boolean): Promise<string[]> {
-  const dirs = new Set<string>();
-  // Untracked files too, as the benchmarks being written.
-  for (const file of output(["git", "ls-files", "--cached", "--others", "--exclude-standard", "*_test.go"]).split("\n")) {
+/** Returns packages with benchmarks included by the current Go build context. */
+export async function benchmarkPackages(e2e: boolean, cwd = "."): Promise<string[]> {
+  const candidates = new Map<string, Set<string>>();
+  // Untracked files too, as the benchmarks being written; keep testdata
+  // packages such as ui/testdata, which go list ./... would leave out.
+  for (const file of output(["git", "ls-files", "--cached", "--others", "--exclude-standard", "*_test.go"], cwd).split("\n")) {
     if (!file) continue;
-    const dir = file.includes("/") ? file.slice(0, file.lastIndexOf("/")) : ".";
+    const at = file.lastIndexOf("/");
+    const dir = at < 0 ? "." : file.slice(0, at);
     if (!e2e && dir === "internal/e2e") continue;
-    dirs.add(dir);
+    if (!/^func Benchmark/m.test(await readFile(join(cwd, file), "utf8"))) continue;
+    if (!candidates.has(dir)) candidates.set(dir, new Set());
+    candidates.get(dir)!.add(file.slice(at + 1));
   }
-  const pkgs = [...dirs].sort().map((dir) => (dir === "." ? "." : "./" + dir));
-  // The test files that build here, by package; go list rather than ./...,
-  // which skips testdata directories.
-  const listed = output(["go", "list", "-e", "-f", '{{.Dir}}|{{join .TestGoFiles ","}},{{join .XTestGoFiles ","}}', ...pkgs]);
-  const benchmarked: string[] = [];
-  for (const line of listed.split("\n")) {
-    const [dir, files] = line.split("|");
-    for (const file of files!.split(",")) {
-      if (file && /^func Benchmark/m.test(await readFile(join(dir!, file), "utf8"))) {
-        const rel = relative(process.cwd(), dir!);
-        benchmarked.push(rel ? "./" + rel : ".");
-        break;
-      }
+  if (!candidates.size) return [];
+  const paths = [...candidates.keys()].sort().map((dir) => (dir === "." ? "." : "./" + dir));
+  // Go selects files by GOOS, GOARCH, build tags and cgo settings. A package
+  // with no files for this platform is expected; other package errors are not.
+  const listed = output(["go", "list", "-e", "-json=Dir,Match,TestGoFiles,XTestGoFiles,Error", ...paths], cwd);
+  const packages: string[] = [];
+  for (const object of listed.split(/\r?\n(?=\{)/)) {
+    const pkg: { Dir: string; Match: string[]; TestGoFiles?: string[]; XTestGoFiles?: string[]; Error?: { Err: string } } = JSON.parse(object);
+    if (pkg.Error) {
+      if (pkg.Error.Err.startsWith("build constraints exclude all Go files")) continue;
+      throw new Error(pkg.Error.Err);
     }
+    const path = pkg.Match[0]!;
+    const names = candidates.get(path === "." ? "." : path.slice(2))!;
+    if ([...(pkg.TestGoFiles ?? []), ...(pkg.XTestGoFiles ?? [])].some((file) => names.has(file))) packages.push(path);
   }
-  return benchmarked.sort();
+  return packages.sort();
 }
 
 /** Runs go test, showing its output as it comes. */
@@ -276,8 +278,8 @@ async function measureApps(
   }
 }
 
-function output(cmd: string[]): string {
-  const proc = Bun.spawnSync(cmd, { stderr: "inherit" });
+function output(cmd: string[], cwd?: string): string {
+  const proc = Bun.spawnSync(cmd, { stderr: "inherit", cwd });
   if (proc.exitCode !== 0) throw new Error(`${cmd.join(" ")} exited with ${proc.exitCode}`);
   return proc.stdout.toString().trim();
 }

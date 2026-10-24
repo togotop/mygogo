@@ -1,0 +1,34 @@
+// mygo 的 Android 桥：任何宿主都能复用的那一半。
+//
+// 装的是「与界面无关」的东西：MygoPlatform 的 JNI 桥（约 90 个方法）、Native 契约类、
+// 前台服务、通知接收方、快捷磁贴、桌面小组件、HCE 服务，以及它们的资源与 manifest
+// 组件。游戏引擎这类宿主（窗口归它自己）只要 implementation 这个模块 + 一个
+// libmygo.so，就能用 MyGo 的服务层。
+//
+// 不含：MygoActivity/MygoView/MygoIme/MygoInput（MyGo 自己的渲染宿主）与
+// MygoFirebaseService（Firebase 是宿主的选择）。
+plugins {
+    id 'com.android.library'
+}
+
+android {
+    // 与 app 不同名：两个模块共用一个 namespace 会撞 R 类。
+    namespace 'org.mygo.bridge'
+
+    compileSdk 36
+    defaultConfig {
+        minSdk 29
+    }
+    compileOptions {
+        sourceCompatibility JavaVersion.VERSION_17
+        targetCompatibility JavaVersion.VERSION_17
+    }
+}
+
+dependencies {
+    implementation 'androidx.core:core:1.13.1'
+    // 扫码解码（MygoPlatform.scanImage 用它解二维码）。
+    implementation 'com.google.zxing:core:3.5.3'
+    // 推送注册仍在 MygoPlatform 里（App.RegisterPushNotifications）；抽出去是后续的事。
+    implementation 'com.google.firebase:firebase-messaging:24.1.2'
+}

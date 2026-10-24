@@ -14,6 +14,7 @@ import (
 	"slices"
 	"strconv"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/egoist/mygo/internal/platform"
@@ -26,11 +27,44 @@ var ErrNoReply = errors.New("fake: no reply")
 
 // Backend is a fake platform backend.
 type Backend struct {
-	h      platform.AppHandler
-	mainID uint64
-	signal chan struct{}
-	wake   chan struct{}
-	quit   chan struct{}
+	SpeechStart           func(platform.SpeechOptions, func(platform.SpeechResult)) (platform.SpeechRecording, error)
+	BiometricStatus       platform.BiometricStatus
+	LastAuthentication    platform.AuthenticationOptions
+	AuthenticationError   error
+	AuthenticationPending bool
+	authenticationDone    func(error)
+	authenticationID      uint64
+	HapticCalls           []string
+	// BackHandled is what the installed back handler answered, and BackCalls
+	// counts the calls; BackHandler is the last one installed.
+	BackCalls          int
+	BackHandled        bool
+	BackHandler        func() bool
+	BadgeCount         int
+	StatusBarStyle     string
+	StatusBarHidden    bool
+	PushRegistrations  int
+	MobileError        error
+	DeviceInfo         platform.DeviceInfo
+	KeyboardDismissals int
+	// ScanResult and ScanError complete ScanCode unless ScanPending holds it
+	// open for FinishScan or cancellation.
+	ScanResult     string
+	ScanError      error
+	ScanPending    bool
+	LastScan       platform.ScanOptions
+	scanDone       func(string, error)
+	NetworkURLs    []string
+	NetworkError   error
+	NetworkPending bool
+	networkDone    func(error)
+
+	SystemManaged atomic.Bool // Simulate an OS-owned application lifetime in tests.
+	h             platform.AppHandler
+	mainID        uint64
+	signal        chan struct{}
+	wake          chan struct{}
+	quit          chan struct{}
 
 	mu               sync.Mutex
 	windows          []*Window
@@ -119,9 +153,24 @@ type Backend struct {
 	MessageResult platform.MessageBoxResult
 	// OnOpenDialog, OnSaveDialog and OnMessageBox, when set, answer the
 	// dialogs instead of the results above. They run on the main thread.
-	OnOpenDialog func(opts *platform.OpenDialogOptions) []string
-	OnSaveDialog func(opts *platform.SaveDialogOptions) string
-	OnMessageBox func(opts *platform.MessageBoxOptions) platform.MessageBoxResult
+	OnOpenDialog       func(opts *platform.OpenDialogOptions) []string
+	OnSaveDialog       func(opts *platform.SaveDialogOptions) string
+	OnMessageBox       func(opts *platform.MessageBoxOptions) platform.MessageBoxResult
+	LastExport         platform.ExportDialogOptions
+	ExportResult       bool
+	ExportError        error
+	LastPhoto          platform.PhotoDialogOptions
+	PhotoResult        []string
+	PhotoError         error
+	LastShare          platform.ShareOptions
+	ShareResult        platform.ShareResult
+	ShareError         error
+	PermissionStatuses map[string]string
+	PermissionDecision string
+	PermissionError    error
+	SettingsOpened     int
+	secureItems        map[string][]byte
+	SecureStoreError   error
 	// NotificationError, when set, is what showing a notification fails
 	// with.
 	NotificationError error
@@ -157,6 +206,8 @@ func goroutineID() uint64 {
 }
 
 func (b *Backend) Name() string { return "fake" }
+
+func (b *Backend) SystemManagedLifetime() bool { return b.SystemManaged.Load() }
 
 func (b *Backend) Init(h platform.AppHandler, _ platform.AppOptions) error {
 	b.h = h
@@ -513,6 +564,8 @@ type Window struct {
 	// TitleBarRoom is what TitleBar returns: set for windows with a hidden
 	// title bar, and changed by tests before they call H.TitleBarChanged.
 	TitleBarRoom platform.TitleBar
+	// SafeAreaRoom is what SafeArea returns, which SetSafeArea sets.
+	SafeAreaRoom platform.SafeArea
 	// MaximizeButton is where the content last said it shows the maximize
 	// button.
 	MaximizeButton platform.RectF
@@ -615,6 +668,14 @@ func (w *Window) TitleBar() platform.TitleBar {
 	w.mu.Lock()
 	defer w.mu.Unlock()
 	return w.TitleBarRoom
+}
+
+// SafeArea returns what the test set with SetSafeArea, for the tests that
+// drive a window as a phone lays one out.
+func (w *Window) SafeArea() platform.SafeArea {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	return w.SafeAreaRoom
 }
 
 func (w *Window) Handle() uintptr        { return 1 }
@@ -1131,6 +1192,17 @@ func (b *Backend) SetSystemLanguages(tags ...string) {
 	b.h.LocaleChanged()
 }
 
+// SetSafeArea makes the window report a device's chrome taking room, as a
+// phone does: a status bar at the top, a home indicator at the bottom. It
+// reports the change the way a device does, through the window's handler,
+// so a view that pads by the safe area is laid out again.
+func (b *Backend) SetSafeArea(w *Window, a platform.SafeArea) {
+	w.mu.Lock()
+	w.SafeAreaRoom = a
+	w.mu.Unlock()
+	w.H.SafeAreaChanged()
+}
+
 // SetSystemRegion changes the user's regional formats, as the user does
 // in the system's settings, and reports it.
 func (b *Backend) SetSystemRegion(r platform.Region) {
@@ -1364,6 +1436,15 @@ func (s *Surface) Accessibility() (*platform.AccessTree, int) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	return s.access, s.accessN
+}
+
+func (d dialogs) ShowExportDialog(_ platform.Window, o *platform.ExportDialogOptions, cb func(bool, error)) {
+	d.b.LastExport = *o
+	cb(d.b.ExportResult, d.b.ExportError)
+}
+func (d dialogs) ShowPhotoDialog(_ platform.Window, o *platform.PhotoDialogOptions, cb func([]string, error)) {
+	d.b.LastPhoto = *o
+	cb(d.b.PhotoResult, d.b.PhotoError)
 }
 
 // secrets keeps secrets in memory. Like the real stores it may be called

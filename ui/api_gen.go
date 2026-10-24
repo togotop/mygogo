@@ -120,6 +120,22 @@ func (_handle *Router) View(c *Context, fn func(r *Route)) Element {
 	return wrapElement(_e)
 }
 
+// View builds splash until startup is ready, then shows content, crossfading
+// unless SkipTransition is set.
+// Both builders use ordinary UI components and inherit the current theme.
+// Content is inert until the transition completes, including its keyboard
+// shortcuts and accessibility actions. The returned box fills its parent.
+func (_handle *Startup) View(c *Context, splash func(), content func()) Element {
+	_ctx := c.build()
+	if _ctx == nil {
+		return Element{}
+	}
+	_ctx.rt.beginBuild()
+	_e := _handle.coreView(_ctx, splash, content)
+	_ctx.rt.endBuild()
+	return wrapElement(_e)
+}
+
 // Panel builds fn in the panel of the collapsible while it is open, and as
 // it opens and closes, when the panel grows and shrinks with Progress,
 // clipping what fn built. It returns the column holding what fn builds,
@@ -151,8 +167,8 @@ func (_handle CollapsibleParts) Progress() float32 {
 }
 
 // Chosen returns the option the user chose in this frame, by a click or
-// Enter: ask it after Popup, which takes the input of the options it
-// built as it returns, so the choice can be handled in the same build pass.
+// Enter: ask it after Popup or Inline, which take the input of the options
+// they built as they return, so the choice can be handled in the same build pass.
 func (_handle ComboboxParts) Chosen() (string, bool) {
 	_parts := _handle.resolve()
 	if _parts == nil {
@@ -176,6 +192,30 @@ func (_handle ComboboxParts) Filtering() bool {
 	return _parts.Filtering()
 }
 
+// Inline builds an always-visible options panel in the normal layout, as
+// below a search field in a command palette. Style panel and build its options
+// with Item. The first option is highlighted initially and after typing;
+// arrows, clicks and Chosen work as for Popup. Escape is left to the containing
+// dialog, and an empty panel stays visible so fn can show an empty-state message.
+// Call either Inline or Popup once per build, before asking Chosen.
+func (_handle ComboboxParts) Inline(fn func(panel Element)) Element {
+	_parts := _handle.resolve()
+	if _parts == nil {
+		return Element{}
+	}
+	_ctx := _parts.c
+	_ = _ctx
+	_ctx.rt.beginBuild()
+	_e := _parts.Inline(func() func(panel *node) {
+		if fn == nil {
+			return nil
+		}
+		return func(panel *node) { fn(wrapElement(panel)) }
+	}())
+	_ctx.rt.endBuild()
+	return wrapElement(_e)
+}
+
 // Item creates an option: a row that is Highlighted when the pointer or
 // the arrows are on it, and that chooses value when clicked. The option
 // the highlight moves to scrolls into view, once, so that the wheel
@@ -193,7 +233,7 @@ func (_handle ComboboxParts) Item(value string) Element {
 	return wrapElement(_e)
 }
 
-// Open reports whether the popup shows.
+// Open reports whether the options panel shows.
 func (_handle ComboboxParts) Open() bool {
 	_parts := _handle.resolve()
 	if _parts == nil {
@@ -215,12 +255,17 @@ func (_handle ComboboxParts) Popup(fn func(panel Element)) Element {
 	_ctx := _parts.c
 	_ = _ctx
 	_ctx.rt.beginBuild()
-	_e := _parts.Popup(func(panel *node) { fn(wrapElement(panel)) })
+	_e := _parts.Popup(func() func(panel *node) {
+		if fn == nil {
+			return nil
+		}
+		return func(panel *node) { fn(wrapElement(panel)) }
+	}())
 	_ctx.rt.endBuild()
 	return wrapElement(_e)
 }
 
-// SetOpen opens or closes the popup.
+// SetOpen opens or closes the popup. Inline always shows its panel.
 func (_handle ComboboxParts) SetOpen(o bool) {
 	_parts := _handle.resolve()
 	if _parts == nil {
@@ -282,6 +327,17 @@ func (_handle *Context) Announce(text string) {
 		return
 	}
 	_ctx.Announce(text)
+}
+
+// Blur clears keyboard focus and dismisses the software keyboard. It is useful
+// for a keyboard accessory's reading-mode action; the next input tap can focus
+// its editor again.
+func (_handle *Context) Blur() {
+	_ctx := _handle.build()
+	if _ctx == nil {
+		return
+	}
+	_ctx.Blur()
 }
 
 // CloseToast closes the toast with id, or every toast when id is empty,
@@ -1011,7 +1067,12 @@ func DialogBase(c *Context, open *bool, fn func(backdrop Element, panel Element)
 		return Element{}
 	}
 	_ctx.rt.beginBuild()
-	_e := coreDialogBase(_ctx, open, func(backdrop *node, panel *node) { fn(wrapElement(backdrop), wrapElement(panel)) })
+	_e := coreDialogBase(_ctx, open, func() func(backdrop *node, panel *node) {
+		if fn == nil {
+			return nil
+		}
+		return func(backdrop *node, panel *node) { fn(wrapElement(backdrop), wrapElement(panel)) }
+	}())
 	_ctx.rt.endBuild()
 	return wrapElement(_e)
 }
@@ -1277,6 +1338,22 @@ func Image(c *Context, src ImageSource) Element {
 	return wrapElement(_e)
 }
 
+// InputAccessoryBar draws actions as Go buttons, the way iOS shows an
+// InputAccessory above its keyboard, for platforms and tests without that
+// native view. It keeps the input's focus. Actions with Items open their
+// panel above the row while *expanded; a long press sends LongPressID. Draw
+// it below the focused input while it has the focus.
+func InputAccessoryBar(c *Context, actions []InputAction, expanded *bool, handler func(arg0 string)) Element {
+	_ctx := c.build()
+	if _ctx == nil {
+		return Element{}
+	}
+	_ctx.rt.beginBuild()
+	_e := coreInputAccessoryBar(_ctx, actions, expanded, handler)
+	_ctx.rt.endBuild()
+	return wrapElement(_e)
+}
+
 // Link creates a text that opens url in the browser when clicked, or
 // Enter while it has the focus. In a page of a Router, a path without a
 // scheme, as "/notes/42" or "edit", goes there in the router (Push).
@@ -1363,7 +1440,12 @@ func Modal(c *Context, open *bool, fn func()) Element {
 // elements given one key under one parent make it panic where the second
 // was given, as apps only log it.
 func NewTester(view func(c *Context), width int, height int) *Tester {
-	return coreNewTester(func(c *context) { view(makeContext(c)) }, width, height)
+	return coreNewTester(func() func(c *context) {
+		if view == nil {
+			return nil
+		}
+		return func(c *context) { view(makeContext(c)) }
+	}(), width, height)
 }
 
 // NumberInput creates a text input editing *value as a number between lo
@@ -1485,7 +1567,12 @@ func PopoverBase(c *Context, anchor Element, open *bool, fn func(panel Element))
 		return Element{}
 	}
 	_ctx.rt.beginBuild()
-	_e := corePopoverBase(_ctx, anchor.nodeFor(_ctx.rt), open, func(panel *node) { fn(wrapElement(panel)) })
+	_e := corePopoverBase(_ctx, anchor.nodeFor(_ctx.rt), open, func() func(panel *node) {
+		if fn == nil {
+			return nil
+		}
+		return func(panel *node) { fn(wrapElement(panel)) }
+	}())
 	_ctx.rt.endBuild()
 	return wrapElement(_e)
 }
@@ -1604,7 +1691,12 @@ func Rating(c *Context, value *int, max int) Element {
 // Render draws a frame of view in a window of width×height DIPs at scale
 // device pixels per DIP, without a window: for snapshots and tests.
 func Render(view func(c *Context), width int, height int, scale float32) *image.RGBA {
-	return coreRender(func(c *context) { view(makeContext(c)) }, width, height, scale)
+	return coreRender(func() func(c *context) {
+		if view == nil {
+			return nil
+		}
+		return func(c *context) { view(makeContext(c)) }
+	}(), width, height, scale)
 }
 
 // RichText creates a text whose spans differ in style, over the style of
@@ -2327,7 +2419,12 @@ func ToastViewportBase(c *Context, fn func(viewport Element, toasts []Toast)) El
 		return Element{}
 	}
 	_ctx.rt.beginBuild()
-	_e := coreToastViewportBase(_ctx, func(viewport *node, toasts []Toast) { fn(wrapElement(viewport), toasts) })
+	_e := coreToastViewportBase(_ctx, func() func(viewport *node, toasts []Toast) {
+		if fn == nil {
+			return nil
+		}
+		return func(viewport *node, toasts []Toast) { fn(wrapElement(viewport), toasts) }
+	}())
 	_ctx.rt.endBuild()
 	return wrapElement(_e)
 }
@@ -2463,7 +2560,12 @@ func TooltipBase(c *Context, anchor Element, fn func(tip Element)) Element {
 		return Element{}
 	}
 	_ctx.rt.beginBuild()
-	_e := coreTooltipBase(_ctx, anchor.nodeFor(_ctx.rt), func(tip *node) { fn(wrapElement(tip)) })
+	_e := coreTooltipBase(_ctx, anchor.nodeFor(_ctx.rt), func() func(tip *node) {
+		if fn == nil {
+			return nil
+		}
+		return func(tip *node) { fn(wrapElement(tip)) }
+	}())
 	_ctx.rt.endBuild()
 	return wrapElement(_e)
 }
@@ -2516,7 +2618,12 @@ func TreeItem(c *Context, label string, open *bool, children func()) Element {
 // something animates. A Content can serve several windows, each with its
 // own state.
 func View(view func(c *Context)) *Content {
-	return coreView(func(c *context) { view(makeContext(c)) })
+	return coreView(func() func(c *context) {
+		if view == nil {
+			return nil
+		}
+		return func(c *context) { view(makeContext(c)) }
+	}())
 }
 
 // WebView shows a web view, made with mygo.Window.NewWebView, in the
@@ -3930,6 +4037,21 @@ func (_handle Element) GapY(v float32) Element {
 	return wrapElement(_node.GapY(v))
 }
 
+// Gestures opts an element into pinch/rotation input and returns updates since
+// its last frame. A gesture stays with its starting element until it ends or
+// that element disappears. A backend whose surface reports SurfaceGesture
+// events supplies these; on a touchscreen the system recognizes the two-finger
+// pinch and rotate and hands them over as deltas.
+func (_handle Element) Gestures() []GestureEvent {
+	_node := _handle.node()
+	if _node == nil {
+		return nil
+	}
+	_ctx := _node.c
+	_ = _ctx
+	return _node.Gestures()
+}
+
 // Gradient fills the element with a linear gradient from one color to
 // another, at angle degrees clockwise from upwards as in CSS: 180 goes
 // from top to bottom, 90 from left to right.
@@ -4040,6 +4162,20 @@ func (_handle Element) HeightPercent(p float32) Element {
 	return wrapElement(_node.HeightPercent(p))
 }
 
+// HideScrollbars hides both scroll bars and their pointer targets. Scrolling,
+// keyboard navigation, accessibility and tracked offsets remain available.
+// Apply to Scroll, ScrollHorizontal, ScrollBoth, List, GridView or TextArea
+// each frame.
+func (_handle Element) HideScrollbars() Element {
+	_node := _handle.node()
+	if _node == nil {
+		return Element{}
+	}
+	_ctx := _node.c
+	_ = _ctx
+	return wrapElement(_node.HideScrollbars())
+}
+
 // Highlighted reports whether an option of a select is the one the pointer
 // or the arrows are on.
 func (_handle Element) Highlighted() bool {
@@ -4092,6 +4228,20 @@ func (_handle Element) InView() bool {
 	return _node.InView()
 }
 
+// InputAccessory attaches actions above the iOS system keyboard while this
+// input has focus. Other platforms ignore the native controls. The handler
+// runs on the UI thread without changing text focus or committing marked text.
+// Omit the call on later frames to remove the accessory.
+func (_handle Element) InputAccessory(actions []InputAction, handler func(arg0 string)) Element {
+	_node := _handle.node()
+	if _node == nil {
+		return Element{}
+	}
+	_ctx := _node.c
+	_ = _ctx
+	return wrapElement(_node.InputAccessory(actions, handler))
+}
+
 // InputMethod sets whether the system's input methods compose text for the
 // element while it has the keyboard focus, as they do by default for one
 // that takes text (HandleTextInput, TextCaret). Turned off, keys type the
@@ -4108,6 +4258,34 @@ func (_handle Element) InputMethod(on bool) Element {
 	_ctx := _node.c
 	_ = _ctx
 	return wrapElement(_node.InputMethod(on))
+}
+
+// InputModifiers adds software modifiers to ASCII text and control keys of
+// a custom HandleInput/TextCaret widget. It leaves IME composition, commits
+// and multi-character paste untouched. consumed runs on the UI thread after
+// a key is handled, allowing an app to release one-shot modifiers. Omitting
+// the call clears the modifiers. Standard text editors are unaffected.
+func (_handle Element) InputModifiers(mods Modifiers, consumed func()) Element {
+	_node := _handle.node()
+	if _node == nil {
+		return Element{}
+	}
+	_ctx := _node.c
+	_ = _ctx
+	return wrapElement(_node.InputModifiers(mods, consumed))
+}
+
+// InputOptions supplies this frame's keyboard traits for an editable field or
+// a custom HandleInput/TextCaret element, such as a terminal. Omitting the call
+// on a subsequent frame restores the default traits.
+func (_handle Element) InputOptions(o InputOptions) Element {
+	_node := _handle.node()
+	if _node == nil {
+		return Element{}
+	}
+	_ctx := _node.c
+	_ = _ctx
+	return wrapElement(_node.InputOptions(o))
 }
 
 // InsetShadow adds an inner box shadow, as CSS's box-shadow: inset: offset
@@ -5476,6 +5654,20 @@ func (_handle Element) TextCaret(r Rect) Element {
 	return wrapElement(_node.TextCaret(r))
 }
 
+// TextCaretFunc is TextCaret for a custom drawing whose cursor depends on its
+// final layout or rendered grid. fn runs on the UI thread after painting, so
+// the input method and the visible cursor use the same frame's geometry.
+// The returned rectangle is relative to the element's box.
+func (_handle Element) TextCaretFunc(fn func() Rect) Element {
+	_node := _handle.node()
+	if _node == nil {
+		return Element{}
+	}
+	_ctx := _node.c
+	_ = _ctx
+	return wrapElement(_node.TextCaretFunc(fn))
+}
+
 // TextColor sets the color of text.
 func (_handle Element) TextColor(c Color) Element {
 	_node := _handle.node()
@@ -5485,6 +5677,22 @@ func (_handle Element) TextColor(c Color) Element {
 	_ctx := _node.c
 	_ = _ctx
 	return wrapElement(_node.TextColor(c))
+}
+
+// TextContext supplies committed surrounding text and its caret (in runes)
+// for a custom TextCaret handler. fn runs on the UI thread. The handler owns
+// the document and applies InputTextReplace and InputSelection events;
+// native composition remains virtual until committed. This does not create
+// an editor or change pointer selection/rendering. Use HandleTextInput when
+// full indexed geometry or document selection is required.
+func (_handle Element) TextContext(fn func() (string, int)) Element {
+	_node := _handle.node()
+	if _node == nil {
+		return Element{}
+	}
+	_ctx := _node.c
+	_ = _ctx
+	return wrapElement(_node.TextContext(fn))
 }
 
 // TextRanges styles runs of a text input's text, in the frames that call
@@ -5584,6 +5792,32 @@ func (_handle Element) TopPercent(p float32) Element {
 	_ctx := _node.c
 	_ = _ctx
 	return wrapElement(_node.TopPercent(p))
+}
+
+// TouchScroll makes a custom input widget take finger drags as precise
+// InputScroll events. A stationary tap still delivers pointer Down/Up and
+// focuses the widget; a swipe does neither, so it can scroll without
+// opening the keyboard. Mouse input and pointer tracking are unchanged.
+func (_handle Element) TouchScroll() Element {
+	_node := _handle.node()
+	if _node == nil {
+		return Element{}
+	}
+	_ctx := _node.c
+	_ = _ctx
+	return wrapElement(_node.TouchScroll())
+}
+
+// TouchSelection lets a TouchScroll widget reserve a stationary long press
+// for its InputLongPress handler. Moving before the hold still scrolls.
+func (_handle Element) TouchSelection() Element {
+	_node := _handle.node()
+	if _node == nil {
+		return Element{}
+	}
+	_ctx := _node.c
+	_ = _ctx
+	return wrapElement(_node.TouchSelection())
 }
 
 // TrackLines keeps in l where the text area lays out its lines.
@@ -5894,7 +6128,12 @@ func (_handle SelectParts[T]) Popup(fn func(panel Element)) Element {
 	_ctx := _parts.c
 	_ = _ctx
 	_ctx.rt.beginBuild()
-	_e := _parts.Popup(func(panel *node) { fn(wrapElement(panel)) })
+	_e := _parts.Popup(func() func(panel *node) {
+		if fn == nil {
+			return nil
+		}
+		return func(panel *node) { fn(wrapElement(panel)) }
+	}())
 	_ctx.rt.endBuild()
 	return wrapElement(_e)
 }

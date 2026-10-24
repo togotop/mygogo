@@ -41,7 +41,11 @@ func (s *counter) view(c *ui.Context) {
 	})
 }
 
-func main() {
+func main() { run() }
+
+// run starts the app. Desktop calls it from main; Android calls it from
+// jni.Start, because a c-shared library never has its main called.
+func run() {
 	s := &counter{}
 	mygo.App.WhenReady(func() {
 		mygo.NewWindow(mygo.WindowOptions{

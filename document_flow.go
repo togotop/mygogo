@@ -267,22 +267,17 @@ func (b *docBase) windowClosed() {
 	b.mu.Lock()
 	w := b.window
 	b.closed = true
-	b.window = nil
 	keep := b.edited && !b.discarded
 	if b.timer != nil {
 		b.timer.Stop()
 	}
-	b.mu.Unlock()
-	docRegistry.Lock()
-	delete(docRegistry.byWindow, w)
-	docRegistry.Unlock()
 	k := b.kind
-	k.mu.Lock()
-	if i := slices.Index(k.docs, b); i >= 0 {
-		k.docs = slices.Delete(k.docs, i, i+1)
-	}
-	k.mu.Unlock()
-	b.watch()
+	// The follow-up write is queued before the document stops reporting a
+	// window, and while its lock is still held. A caller that waits for
+	// Window() == nil — a test cleaning up, an app closing everything before
+	// it exits — then knows nothing can be queued behind its back: the
+	// queue would be a WaitGroup Wait on one side and Add on the other,
+	// which the race detector reports and which the WaitGroup forbids.
 	if keep {
 		// Closed without asking (Window.Destroy, a parent closing, a quit
 		// keeping documents): the changes stay in the recovery copy.
@@ -290,6 +285,17 @@ func (b *docBase) windowClosed() {
 	} else {
 		docWork.Go(func() { k.recovery.remove(b) })
 	}
+	b.window = nil
+	b.mu.Unlock()
+	docRegistry.Lock()
+	delete(docRegistry.byWindow, w)
+	docRegistry.Unlock()
+	k.mu.Lock()
+	if i := slices.Index(k.docs, b); i >= 0 {
+		k.docs = slices.Delete(k.docs, i, i+1)
+	}
+	k.mu.Unlock()
+	b.watch()
 	refreshDocumentMenus()
 }
 

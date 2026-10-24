@@ -54,19 +54,26 @@ type Application struct {
 	// JumpList controls the jump list of the taskbar button on Windows.
 	JumpList *JumpList
 
-	onReady           listeners[func()]
-	onWindowAllClosed listeners[func()]
-	onBeforeQuit      listeners[func(*QuitEvent)]
-	onWillQuit        listeners[func(*QuitEvent)]
-	onQuit            listeners[func()]
-	onActivate        listeners[func(bool)]
-	onDidBecomeActive listeners[func()]
-	onDidResignActive listeners[func()]
-	onOpenURL         listeners[func(string)]
-	onOpenFile        listeners[func(string)]
-	onWindowCreated   listeners[func(*Window)]
+	onReady               listeners[func()]
+	onWindowAllClosed     listeners[func()]
+	onBeforeQuit          listeners[func(*QuitEvent)]
+	onWillQuit            listeners[func(*QuitEvent)]
+	onQuit                listeners[func()]
+	onActivate            listeners[func(bool)]
+	onDidBecomeActive     listeners[func()]
+	onDidResignActive     listeners[func()]
+	onDidEnterBackground  listeners[func()]
+	onWillEnterForeground listeners[func()]
+	onLifecycleChanged    listeners[func(LifecycleState)]
+	onStateSaveError      listeners[func(error)]
+	lifecycle             LifecycleState
+	state                 appStateStore // UI thread only
+	onOpenURL             listeners[func(string)]
+	onOpenFile            listeners[func(string)]
+	onWindowCreated       listeners[func(*Window)]
 
 	onNotificationClick listeners[func(string)]
+	onMemoryWarning     listeners[func(int)]
 }
 
 // App is the application singleton.
@@ -87,9 +94,22 @@ func (a *Application) Run() error {
 	if out := os.Getenv("MYGO_GENERATE"); out != "" {
 		return writeClient(out)
 	}
-	if !isMainThread() {
+	if host, ok := backend().(platform.ApplicationHost); ok {
+		return host.RunApplication(a.start, a.finish)
+	}
+	if !isMainThread() && !runFromAnyGoroutine() {
 		return errors.New("mygo: App.Run must be called from the main goroutine")
 	}
+	if err := a.start(); err != nil {
+		return err
+	}
+	err := backend().Run()
+	a.finish()
+	return err
+}
+
+// start initializes the application on its UI thread.
+func (a *Application) start() error {
 	a.mu.Lock()
 	if a.running {
 		a.mu.Unlock()
@@ -116,9 +136,22 @@ func (a *Application) Run() error {
 	quitOnSignals()
 	// Run whatever was scheduled before the event loop existed.
 	b.Signal()
-	err := b.Run()
-	a.finish()
-	return err
+	return nil
+}
+
+// WindowsSupported reports whether this host can create windows. It answers
+// false when the app runs without a surface — a game engine that owns the
+// window and uses MyGo only for its services — where NewWindow would have
+// nothing to draw into.
+func WindowsSupported() bool {
+	needsApp("WindowsSupported")
+	supported := true
+	onMain(func() {
+		if h, ok := backend().(platform.Headless); ok {
+			supported = !h.Headless()
+		}
+	})
+	return supported
 }
 
 // needsApp panics when main calls something that needs the running app
@@ -154,9 +187,12 @@ func (a *Application) IsReady() bool {
 
 // Quit closes all windows and then quits. OnBeforeQuit and OnWillQuit
 // listeners, as well as the OnClose listeners of every window, can cancel
-// it.
+// it. On iOS this does nothing; TryQuit reports ErrUnsupported.
 func (a *Application) Quit() {
 	postMain(func() {
+		if backend().SystemManagedLifetime() {
+			return
+		}
 		if a.prepareQuit() {
 			backend().Quit()
 		}
@@ -164,8 +200,12 @@ func (a *Application) Quit() {
 }
 
 // Exit terminates the process immediately with the given exit code,
-// without emitting quit events or asking windows.
+// without emitting quit events or asking windows. On iOS this does nothing;
+// the system owns the process lifetime.
 func (a *Application) Exit(code int) {
+	if backend().SystemManagedLifetime() {
+		return
+	}
 	onMain(func() {
 		for _, w := range Windows() {
 			w.destroy()
@@ -178,7 +218,7 @@ func (a *Application) Exit(code int) {
 // prepareQuit runs the quit sequence on the main thread and reports whether
 // the application may quit.
 func (a *Application) prepareQuit() bool {
-	if a.quitting {
+	if a.IsSystemManaged() || a.quitting {
 		return false
 	}
 	before := &QuitEvent{}
@@ -210,6 +250,8 @@ func (a *Application) prepareQuit() bool {
 // finish runs once after the event loop has stopped.
 func (a *Application) finish() {
 	a.finished.Do(func() {
+		a.checkpoint()
+		a.setLifecycle(LifecycleStopped)
 		stopNativeCalls()
 		stopFileWatches()
 		clipboardStopped = true
@@ -237,6 +279,9 @@ func (a *Application) lastWindowClosed() {
 }
 
 func (a *Application) handleReady() {
+	if a.Lifecycle() == LifecycleStarting {
+		a.setLifecycle(LifecycleInactive)
+	}
 	a.mu.Lock()
 	menuSet := a.menuSet
 	a.mu.Unlock()
@@ -569,6 +614,15 @@ func (d *Dock) Hide() { App.SetActivationPolicy(ActivationPolicyAccessory) }
 // Show restores the Dock icon (regular activation policy).
 func (d *Dock) Show() { App.SetActivationPolicy(ActivationPolicyRegular) }
 
+// OnMemoryWarning calls fn when the system is short of memory, with Android's
+// onTrimMemory level (5 running low, 10 background, 15 foreground, 20 visible,
+// 40 moderate, 60 complete, 80 background complete, 100 UI hidden). Other
+// platforms never call it. The freed memory is the app's to choose: dropping
+// caches is the usual answer, and it must stay quick — the system is watching.
+func (a *Application) OnMemoryWarning(fn func(level int)) (off func()) {
+	return a.onMemoryWarning.add(fn, false)
+}
+
 // appHandler receives application events from the backend.
 type appHandler struct{}
 
@@ -579,8 +633,34 @@ func (appHandler) Terminating()        { App.finish() }
 func (appHandler) Activated(visible bool) {
 	fire1(&App.onActivate, visible)
 }
-func (appHandler) DidBecomeActive() { fire(&App.onDidBecomeActive) }
-func (appHandler) DidResignActive() { fire(&App.onDidResignActive) }
+func (appHandler) DidBecomeActive() {
+	if App.setLifecycle(LifecycleActive) {
+		fire(&App.onDidBecomeActive)
+	}
+}
+func (appHandler) DidResignActive() {
+	if App.setLifecycle(LifecycleInactive) {
+		fire(&App.onDidResignActive)
+	}
+}
+func (appHandler) DidEnterBackground() {
+	if App.setLifecycle(LifecycleBackground) {
+		fire(&App.onDidEnterBackground)
+		App.checkpoint()
+	}
+}
+func (appHandler) WillEnterForeground() {
+	if App.setLifecycle(LifecycleInactive) {
+		fire(&App.onWillEnterForeground)
+	}
+}
+
+// MemoryWarning hears the system's memory pressure (Android's onTrimMemory):
+// the level is Android's, and the hooks run on the main thread.
+func (appHandler) MemoryWarning(level int) {
+	fire1(&App.onMemoryWarning, level)
+}
+
 func (appHandler) OpenURLs(urls []string) {
 	for _, u := range urls {
 		fire1(&App.onOpenURL, u)

@@ -29,9 +29,9 @@ type Surface interface {
 	PresentPixels(pix []byte, stride, width, height int)
 	// SetCursor sets the pointer's shape over the surface.
 	SetCursor(c Cursor)
-	// SetTextInput turns text input (IME composition) on for an editable
-	// element, telling input methods where its caret is and the text
-	// around it, or off.
+	// SetTextInput configures the focused editor and its surrounding text,
+	// or turns input off. ReadOnly activates system selection without edits
+	// or a software keyboard on surfaces that support native selection.
 	SetTextInput(t TextInputState)
 	// UpdateAccessibility gives assistive technology the content's
 	// elements. The content calls it after every frame once the surface
@@ -119,11 +119,56 @@ type IdleSurface interface {
 	Idle()
 }
 
+// SwapIntervalSurface is a Surface whose present blocks until a vsync, and
+// which can be told not to (Android's EGL). Optional because only EGL works
+// this way: GTK's area and a Windows swap chain present on their own
+// schedule and have no interval to set.
+//
+// It exists for measurement: with the interval at its default the present
+// span reads the frame's waiting, which is the frame's *pacing* and not its
+// work — a frame that lands just after a vsync waits most of an interval,
+// one in a steady stream waits almost none. Setting it to 0 separates the
+// two, and the pair of readings is what says whether a frame is slow or
+// merely early.
+type SwapIntervalSurface interface {
+	// SetSwapInterval is how many vsyncs the present waits for: 1 is the
+	// default and 0 returns as soon as the buffer is handed over.
+	SetSwapInterval(n int)
+}
+
+// FramePresenter is a surface whose frames drawn on the GPU need showing
+// when the renderer is done with them. EGL is such a renderer: unlike GTK's
+// GtkGLArea (which swaps for its area) and a Windows swap chain (which
+// presents on its own), it leaves the swap to the code that drew, so a
+// window drawing on the GPU has to say when.
+type FramePresenter interface {
+	// SetPresented tells the surface a finished frame is in the renderer's
+	// back buffer, so it can be put on the screen.
+	SetPresented()
+}
+
 // TextInputState is the state of the text input that has the keyboard,
 // for input methods.
 type TextInputState struct {
 	// Active is true while an editable element has the keyboard.
 	Active bool
+	// ID identifies a focused built-in editor (zero for a custom TextCaret).
+	// Bounds is its visible rectangle in surface DIPs.
+	ID     uint64
+	Bounds RectF
+	// Password keeps native input methods from retaining surrounding text.
+	ReadOnly  bool
+	Password  bool
+	Multiline bool
+	// Shared editor history for native undo managers. Custom text handlers
+	// leave these false and retain ownership of their own history.
+	CanUndo, CanRedo bool
+	Options          TextInputOptions
+	// Accessory is JSON describing application-defined software-keyboard
+	// actions. AccessoryID identifies their owner, including custom inputs.
+	// Desktop backends ignore the accessory while retaining text input.
+	Accessory   string
+	AccessoryID uint64
 	// Caret is the caret's rectangle, in DIPs relative to the surface.
 	Caret RectF
 	// Text is the input's text around the caret, and Start and End are the
@@ -142,6 +187,43 @@ type TextInputState struct {
 	NoInputMethod bool
 }
 
+// NativeTextSelectionSurface uses system selection visuals and gestures for
+// editable and read-only selectable text. Passwords and custom TextCaret
+// handlers still draw in Go.
+type NativeTextSelectionSurface interface{ NativeTextSelection() bool }
+
+// TextGeometryHandler optionally answers UIKit-style text geometry queries.
+// Indices refer to the last TextInputState.Text, in runes. Queries run on the
+// UI thread and never change focus or build a frame.
+type TextGeometryHandler interface {
+	TextGeometry(TextGeometryQuery) TextGeometry
+}
+
+type TextGeometryQuery struct {
+	ID         uint64
+	Kind       string // "caret", "selection", or "hit"
+	Start, End int
+	X, Y       float64
+}
+
+type TextGeometry struct {
+	Valid bool
+	Caret RectF
+	Rects []TextSelectionRect
+	Index int
+}
+
+type TextSelectionRect struct {
+	RectF
+	RTL bool
+}
+
+// TextInputOptions are semantic keyboard hints. Backends without software
+// keyboard traits ignore them; they never restrict accepted text.
+type TextInputOptions struct {
+	Keyboard, Return, Content, Correction, Capitalization, Dismiss string
+}
+
 // SurfaceNative holds the native objects of a Surface.
 type SurfaceNative struct {
 	// HWND is the surface's child window (Windows).
@@ -151,7 +233,7 @@ type SurfaceNative struct {
 	// DirectComposition, with the frames' alpha, which the material shows
 	// through.
 	Composed bool
-	// View is the surface's NSView and Layer its layer (macOS).
+	// View is the surface's NSView (macOS) or UIView (iOS), and Layer its layer.
 	View, Layer uintptr
 	// Widget is the surface's GtkGLArea or GtkDrawingArea, and GLArea the
 	// GtkGLArea while its render signal draws a frame with OpenGL, in the
@@ -161,6 +243,12 @@ type SurfaceNative struct {
 	// Context.ID), current while SurfaceFrame events are handled
 	// (browsers).
 	Canvas uintptr
+	// Present is the surface itself, when a frame drawn on the GPU needs
+	// showing by the drawing code (Android, where EGL leaves the swap to
+	// it — see FramePresenter). It is the one field here that is not a
+	// native pointer, because the thing the renderer has to reach is the
+	// surface, and it has no handle the renderer could call through.
+	Present Surface
 }
 
 // RectF is a rectangle in DIPs with fractional coordinates.
@@ -239,6 +327,18 @@ const (
 	DataDragOver
 	DataDragLeave
 	DataDrop
+	// PointerCancel aborts a press without activating the element.
+	PointerCancel
+	// TextSelectionChanged changes the selection in the last TextInputState.Text.
+	TextSelectionChanged
+	// SurfaceMemoryPressure asks the renderer to release disposable buffers.
+	SurfaceMemoryPressure
+	// SurfacePresented confirms the first native presentation completed.
+	SurfacePresented
+	SurfaceKeyboardDismiss
+	SurfaceGesture
+	// SurfaceInputAction invokes Text on the input accessory owned by ID.
+	SurfaceInputAction
 	// SurfaceRenew reports that the native objects a GPU renderer draws
 	// into changed (Surface.Native), as a window of Windows composes its
 	// frames once it has web views: the content makes its renderer again.
@@ -255,9 +355,27 @@ const (
 	WebViewTabOut
 )
 
+// DrawableSurface observes native drawable presentation (Metal on iOS).
+// Renderers call WatchDrawable before presenting; the surface reports
+// SurfacePresented on the UI thread once, also for direct CPU presentation.
+type DrawableSurface interface{ WatchDrawable(drawable uintptr) }
+
+// PointerType identifies the device producing a pointer event.
+type PointerType uint8
+
+const (
+	PointerMouse PointerType = iota
+	PointerTouch
+	PointerPen
+)
+
 // SurfaceEvent is input on a Surface, or a change of it.
 type SurfaceEvent struct {
-	Kind SurfaceEventKind
+	Gesture, Phase string
+	Rotation       float64
+	Kind           SurfaceEventKind
+	PointerID      uint64
+	PointerType    PointerType
 	// X and Y locate the pointer in DIPs relative to the surface.
 	X, Y float64
 	// Button is 0 for the primary button, 1 the secondary, 2 the middle.
@@ -267,7 +385,7 @@ type SurfaceEvent struct {
 	// other devices that scroll by pixels rather than by lines.
 	DX, DY  float64
 	Precise bool
-	// Scale is PointerZoom's.
+	// Scale is PointerZoom's factor or SurfaceGesture's cumulative scale.
 	Scale float64
 	Key   Key
 	// PhysicalKey is the key by its position on an ANSI US keyboard,
@@ -278,6 +396,13 @@ type SurfaceEvent struct {
 	Repeat      bool
 	Text        string
 	Caret       int
+	// Snapshot places the caret at From + Caret after a TextInput replacement.
+	// UIKit sends snapshots of its surrounding-text proxy this way.
+	Snapshot bool
+	// A TextComposition snapshot contains the entire native text proxy.
+	// MarkedStart/End delimit its provisional runes; Caret is in that proxy.
+	// The remaining prefix/suffix are committed without losing surrounding text.
+	MarkedStart, MarkedEnd int
 	// Replace makes TextInput replace, and TextComposition compose over,
 	// the runes From to To of the last TextInputState.Text, instead of the
 	// selection.

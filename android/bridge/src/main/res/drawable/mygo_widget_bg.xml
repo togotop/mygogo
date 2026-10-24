@@ -1,0 +1,6 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- 小组件背景：圆角 + 浅色底。颜色与应用的浅色 token 对齐，重主题的 app 改这里。 -->
+<shape xmlns:android="http://schemas.android.com/apk/res/android">
+    <solid android:color="#F5F6F8" />
+    <corners android:radius="16dp" />
+</shape>

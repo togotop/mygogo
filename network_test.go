@@ -56,6 +56,37 @@ func TestNetwork(t *testing.T) {
 	}
 }
 
+// TestWifiEventNetworks checks that a scan event becomes the public list, and
+// that an event without one is an empty list rather than nil.
+func TestWifiEventNetworks(t *testing.T) {
+	var event wifiEvent
+	if err := json.Unmarshal([]byte(`{"kind":"networks","networks":[{"ssid":"AndroidWifi","bssid":"02:15:b2:00:00:01","rssi":-45,"security":"open"}]}`), &event); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	got := event.networks()
+	if len(got) != 1 {
+		t.Fatalf("networks = %+v", got)
+	}
+	want := WifiNetwork{SSID: "AndroidWifi", BSSID: "02:15:b2:00:00:01", RSSI: -45, Security: "open"}
+	if got[0] != want {
+		t.Errorf("network = %+v, want %+v", got[0], want)
+	}
+	if empty := (wifiEvent{Kind: "networks"}).networks(); len(empty) != 0 {
+		t.Errorf("empty event = %+v", empty)
+	}
+}
+
+// TestWifiErrorCarriesThePlatformMessage checks the fallback for an event that
+// says nothing about what went wrong.
+func TestWifiErrorCarriesThePlatformMessage(t *testing.T) {
+	if got := wifiError("", "the scan failed").Error(); got != "mygo: the scan failed" {
+		t.Errorf("fallback = %q", got)
+	}
+	if got := wifiError("throttled", "the scan failed").Error(); got != "mygo: throttled" {
+		t.Errorf("platform message = %q", got)
+	}
+}
+
 // TestNetworkStatusJSON checks the status's JSON, which pages get through
 // an event.
 func TestNetworkStatusJSON(t *testing.T) {

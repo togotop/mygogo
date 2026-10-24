@@ -3,6 +3,7 @@ package ui
 import (
 	"slices"
 
+	"github.com/egoist/mygo/internal/platform"
 	"github.com/egoist/mygo/internal/text"
 )
 
@@ -72,7 +73,7 @@ type layoutRecord struct {
 	layout     uint64
 	ok         bool
 	style      layoutStyle
-	flags      uint32
+	flags      uint64
 	ts         textLayout
 	cols, rows []Track
 	spans      string
@@ -224,7 +225,7 @@ func (l *textLayout) same(t *textStyle) bool {
 		return true
 	}
 	return (set&setFamily == 0 || l.family == t.family) &&
-		(set&setSize == 0 || l.size == t.size) &&
+		(set&setSize == 0 || l.size == t.size*platform.FontScale()) &&
 		(set&setWeight == 0 || l.weight == t.weight) &&
 		(set&setItalic == 0 || l.italic == t.italic) &&
 		(set&setLineHeight == 0 || l.lineHeight == t.lineHeight && l.fixedLine == t.fixedLine) &&
@@ -245,7 +246,7 @@ func layoutOfText(t *textStyle) textLayout {
 		l.family = t.family
 	}
 	if set&setSize != 0 {
-		l.size = t.size
+		l.size = t.size * platform.FontScale()
 	}
 	if set&setWeight != 0 {
 		l.weight = t.weight

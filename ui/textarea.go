@@ -396,7 +396,7 @@ func (a *area) paint(e *node, p *Painter, ox, oy float32) {
 		start, end := b.start(i), b.end(i)
 		_, sp := ed.rangeSpans(start, end)
 		p.textBackgrounds(l, ox, y, ts, sp)
-		if focused {
+		if focused && !e.c.rt.nativeSelection(e.st) {
 			for _, selected := range ed.selectedRanges() {
 				sa, sz := selected.Start, selected.End
 				if sa == sz || sa > end || sz < start || sz == start && i > 0 && sa < start {
@@ -416,7 +416,7 @@ func (a *area) paint(e *node, p *Painter, ox, oy float32) {
 			}
 		}
 	}
-	if focused && !ed.readOnly {
+	if focused && !ed.readOnly && !e.c.rt.nativeSelection(e.st) {
 		rt := e.c.rt
 		phase := e.c.now.Sub(rt.blinkStart)
 		const blink = 530 * time.Millisecond

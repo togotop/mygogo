@@ -1802,7 +1802,11 @@ func (g *gallery) overlays(c *ui.Context) {
 	})
 }
 
-func main() {
+func main() { run() }
+
+// run starts the gallery. Desktop calls it from main; Android calls it from
+// jni.Start, because a c-shared library never has its main called.
+func run() {
 	g := &gallery{router: ui.NewRouter("/overview"), items: []motionItem{{1, "Item 1"}, {2, "Item 2"}, {3, "Item 3"}}, nextItem: 3, size: "Medium", fruit: "Apple", plan: "Pro", volume: 35, picked: -1, starred: map[int]bool{}, split: 160, copies: 1, tree: map[string]bool{"ui": true}, birthday: time.Date(1815, 12, 10, 0, 0, 0, 0, time.UTC), now: time.Now(), font: "Helvetica", tags: []string{"go", "native"}, sections: [3]bool{true}, sectionsOpen: [2]bool{true, true}, stars: 4, battery: 35, quality: 75, priceLow: 100, priceHigh: 350, meeting: time.Date(2026, 10, 15, 9, 30, 0, 0, time.Local), tint: ui.Hex("#2563eb"), lens: [2]float32{110, 190}, glassEdge: 1, notes: 12, notifyMail: true, pathDepth: 4, chart: newCharts()}
 	// The languages of the Languages page's menu.
 	mygo.App.SetLanguages(galleryLanguages...)

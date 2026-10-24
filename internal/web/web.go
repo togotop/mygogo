@@ -217,6 +217,13 @@ func (*Backend) NotificationsSupported() bool                        { return fa
 func (*Backend) WebViewAvailable() bool                              { return false }
 func (*Backend) RemoveNotification(string)                           {}
 func (*Backend) RemoveAllNotifications()                             {}
+func (*Backend) SystemManagedLifetime() bool                         { return false }
+func (*Backend) Sharing() platform.Sharing                           { return platform.UnsupportedSharing{} }
+func (*Backend) Speech() platform.SpeechRecognizer                   { return platform.UnsupportedSpeech{} }
+func (*Backend) Permissions() platform.Permissions                   { return platform.UnsupportedPermissions{} }
+func (*Backend) SecureStorage() platform.SecureStorage               { return platform.UnsupportedSecureStorage{} }
+func (*Backend) Authenticator() platform.Authenticator               { return platform.UnsupportedAuthenticator{} }
+func (*Backend) Mobile() platform.Mobile                             { return platform.UnsupportedMobile{} }
 
 func (*Backend) ShowNotification(_ *platform.Notification, done func(error)) {
 	done(errUnsupported)
@@ -351,6 +358,14 @@ func (dialogs) ShowOpenDialog(_ platform.Window, _ *platform.OpenDialogOptions, 
 
 func (dialogs) ShowSaveDialog(_ platform.Window, _ *platform.SaveDialogOptions, cb func(string, error)) {
 	cb("", errUnsupported)
+}
+
+func (dialogs) ShowExportDialog(_ platform.Window, _ *platform.ExportDialogOptions, cb func(bool, error)) {
+	cb(false, platform.ErrUnsupported)
+}
+
+func (dialogs) ShowPhotoDialog(_ platform.Window, _ *platform.PhotoDialogOptions, cb func([]string, error)) {
+	cb(nil, platform.ErrUnsupported)
 }
 
 // ShowMessageBox asks with the browser's own dialogs: an alert for one
