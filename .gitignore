@@ -24,3 +24,6 @@ android/app/src/main/assets/google-services.json
 
 # Local-only planning / POC docs (intentionally untracked); kept under docs/local/
 /docs/local/
+
+# Local-only Android smoke test (intentionally untracked)
+/android-smoke
