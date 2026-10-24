@@ -74,7 +74,7 @@ PKG="${PKG_ARG:-${MYGO_ANDROID_PKG:-./internal/android}}"
 # 安卓的字体整形走 C HarfBuzz（shaping/chb.go），链接的是预编译静态库。
 # 它们不进 git（hb-build/.gitignore 挡住 src/），要么本机跑过 build.sh，
 # 要么 CI 从 release 下载解开——两条路都落在同一个位置。
-HB_ROOT="$REPO/third_party/hb-build/src/lib/android"
+HB_ROOT="$REPO/third_party/hb-build/lib/android-arm64"
 if [ -z "${MYGO_HB_ANDROID:-}" ]; then
   if [ -f "$HB_ROOT/lib/libharfbuzz.a" ] && [ -f "$HB_ROOT/lib/libfreetype.a" ]; then
     MYGO_HB_ANDROID="$HB_ROOT"
