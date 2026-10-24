@@ -22,10 +22,5 @@ mygo.ts
 /android/bridge/build/
 android/app/src/main/assets/google-services.json
 
-# Local-only Android planning / POC docs (intentionally untracked)
-docs/android-ble-evaluation.md
-docs/android-capability-plan.md
-docs/android-godot-poc.md
-docs/android-maintenance.md
-docs/android-push.md
-docs/android-smarthome-gaps.md
+# Local-only planning / POC docs (intentionally untracked); kept under docs/local/
+/docs/local/
