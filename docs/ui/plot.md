@@ -85,7 +85,9 @@ ch.Axes = []plot.Axis{
 ch.Series[1].Axis = 1
 ```
 
-`Axis.Format` labels the ticks its way, as `Axis.Format: func(v float64) string {
+`Axis.Title` names the axis above its ticks, as `Title: "mV"`, which is how two
+axes tell themselves apart. `Axis.Format` labels the ticks its way, as
+`Axis.Format: func(v float64) string {
 return strconv.FormatFloat(v, 'f', 1, 64) + " V" }`. `Axis.Log` makes the axis
 logarithmic: the fit rounds out to whole decades, values at or below zero sit
 at the bottom, and Alt with the wheel zooms it in decades. The grid follows

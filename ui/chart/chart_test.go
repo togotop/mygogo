@@ -493,3 +493,18 @@ func TestLogTicks(t *testing.T) {
 	}
 }
 
+
+func TestAxisTitles(t *testing.T) {
+	ticks := []Tick{{At: 0.5, Value: 1, Label: "1"}}
+	tt := ui.NewTester(func(c *ui.Context) {
+		Plot(c, Axes{Left: ticks, Right: ticks, LeftTitle: "mV", RightTitle: "amps"}, func(area ui.Element) {})
+	}, 400, 300)
+	tt.Frame()
+	if !tt.HasText("mV") || !tt.HasText("amps") {
+		t.Fatalf("titles missing: %v", tt.Texts())
+	}
+	if !tt.HasText("1") {
+		t.Fatalf("the ticks went with the titles: %v", tt.Texts())
+	}
+}
+

@@ -58,6 +58,8 @@ type Axis struct {
 	// fit rounds out to whole decades, and values at or below zero sit at
 	// the bottom.
 	Log bool
+	// Title names the axis above its ticks, as a unit or what it measures.
+	Title string
 	// Format labels the ticks; nil labels them with as many decimals as
 	// their step needs.
 	Format func(float64) string
@@ -224,9 +226,10 @@ func (ch *Chart) plot(c *ui.Context) ui.Element {
 	if height <= 0 {
 		height = 200
 	}
-	ax := chart.Axes{Left: ch.yTicks[0], Bottom: ch.xTicks}
+	ax := chart.Axes{Left: ch.yTicks[0], Bottom: ch.xTicks, LeftTitle: ch.axisAt(0).Title}
 	if ch.axisCount() > 1 {
 		ax.Right = ch.yTicks[1]
+		ax.RightTitle = ch.axisAt(1).Title
 	}
 	return chart.Plot(c, ax, func(area ui.Element) {
 		area.Label(ch.Label).Description(ch.Note)

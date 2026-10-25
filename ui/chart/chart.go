@@ -43,6 +43,9 @@ const (
 // a scale's Ticks, or ticks of your own.
 type Axes struct {
 	Left, Right, Top, Bottom []Tick
+	// LeftTitle and RightTitle name the y axes, in a row above the ticks:
+	// a unit, "mV", or what the axis measures.
+	LeftTitle, RightTitle string
 	// Label builds the label of a tick on a side, centered on the tick;
 	// nil shows its Label as text. Labels sit in boxes of no width or
 	// height, so keep their text on one line with NoWrap.
@@ -83,6 +86,17 @@ func Plot(c *ui.Context, axes Axes, build func(area ui.Element)) ui.Element {
 		rows = append([]ui.Track{ui.FitContent()}, rows...)
 		row = 2
 	}
+	titled := axes.LeftTitle != "" || axes.RightTitle != ""
+	topRow := 1
+	if titled {
+		// The titles take a row of their own, above the ticks and the top
+		// axis, so the ticks keep the plot's height.
+		rows = append([]ui.Track{ui.FitContent()}, rows...)
+		row++
+		if len(axes.Top) > 0 {
+			topRow = 2
+		}
+	}
 	if len(axes.Bottom) > 0 {
 		rows = append(rows, ui.FitContent())
 	}
@@ -95,8 +109,20 @@ func Plot(c *ui.Context, axes Axes, build func(area ui.Element)) ui.Element {
 		if len(axes.Right) > 0 {
 			axis(c, Right, axes.Right, label).ColumnStart(col + 1).RowStart(row)
 		}
+		if titled {
+			if axes.LeftTitle != "" && len(axes.Left) > 0 {
+				ui.Row(c).Justify(ui.End).ColumnStart(1).RowStart(1).Children(func() {
+					ui.Text(c, axes.LeftTitle).NoWrap()
+				})
+			}
+			if axes.RightTitle != "" && len(axes.Right) > 0 {
+				ui.Row(c).ColumnStart(col + 1).RowStart(1).Children(func() {
+					ui.Text(c, axes.RightTitle).NoWrap()
+				})
+			}
+		}
 		if len(axes.Top) > 0 {
-			axis(c, Top, axes.Top, label).ColumnStart(col).RowStart(1)
+			axis(c, Top, axes.Top, label).ColumnStart(col).RowStart(topRow)
 		}
 		if len(axes.Bottom) > 0 {
 			axis(c, Bottom, axes.Bottom, label).ColumnStart(col).RowStart(row + 1)

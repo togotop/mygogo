@@ -89,7 +89,7 @@ func main() {
 // where there is no command line and the readings print by default.
 func run() {
 	ch := &plot.Chart{Height: 320, Cursor: true, Legend: true,
-		Axes:  []plot.Axis{{}, {}}, // the last two channels, in millivolts
+		Axes:  []plot.Axis{{Title: "V"}, {Title: "mV"}}, // the last two channels are in millivolts
 		Label: "Four waves", Note: "four channels of a million samples"}
 	for s := range 4 {
 		ch.Series = append(ch.Series, &plot.Series{
