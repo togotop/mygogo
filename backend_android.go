@@ -24,3 +24,8 @@ import (
 // off, GOOS=android keeps falling back to internal/unsupported through
 // backend_other.go.
 func newBackend() platform.Backend { return androidbackend.New() }
+
+// linkNowPlaying is a no-op on Android: Now Playing is not wired to the
+// platform's media session yet. Android satisfies the linux build tag, so
+// nowplaying_other.go leaves this to the Android backend.
+func linkNowPlaying() {}
