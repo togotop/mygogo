@@ -205,11 +205,52 @@ if [ ! -f "$JDK/bin/java" ]; then
   printf '      \342\206\263 \350\241\245\357\274\232设 JAVA_HOME 指向 JDK 17。\n'
 fi
 
+# ---- Gradle 分发镜像：腾讯云优先，失败回退国际源 ---------------------------
+# gradlew 按 distributionUrl 计算缓存目录并下载分发包；这里临时把 URL 换成
+# 腾讯云镜像以加速（国内）。若分发已缓存则跳过换源，避免重复下载；若镜像
+# 不可用则换回官方源重试一次。脚本退出（trap）时恢复原 gradle-wrapper.properties。
+WRAPPER_PROP="$REPO/android/gradle/wrapper/gradle-wrapper.properties"
+WRAPPER_BAK=""
+DIST_BASE="${GRADLE_USER_HOME:-$HOME/.gradle}/wrapper/dists"
+if [ "$GRADLE" = "$REPO/android/gradlew" ] && [ -f "$WRAPPER_PROP" ]; then
+  if ! find "$DIST_BASE" -maxdepth 3 -type d -name 'gradle-[0-9]*' | grep -q .; then
+    WRAPPER_BAK="$WRAPPER_PROP.bak"
+    cp "$WRAPPER_PROP" "$WRAPPER_BAK"
+    URL_LINE="$(grep '^distributionUrl=' "$WRAPPER_PROP")"
+    GVER="$(printf '%s' "$URL_LINE" | sed 's/.*gradle-//; s/[-].*//')"
+    GTYPE="$(printf '%s' "$URL_LINE" | sed 's/.*gradle-[0-9.]*[-]//; s/\.zip//')"
+    GVER="${GVER:-9.1.0}"; GTYPE="${GTYPE:-all}"
+    MIRROR_URL="https://mirrors.cloud.tencent.com/gradle/gradle-${GVER}-${GTYPE}.zip"
+    DEFAULT_URL="https://services.gradle.org/distributions/gradle-${GVER}-${GTYPE}.zip"
+    trap 'if [ -n "$WRAPPER_BAK" ] && [ -f "$WRAPPER_BAK" ]; then cp -f "$WRAPPER_BAK" "$WRAPPER_PROP"; rm -f "$WRAPPER_BAK"; fi' EXIT
+    sed -i "s#^distributionUrl=.*#distributionUrl=$MIRROR_URL#" "$WRAPPER_PROP"
+    printf '   分发镜像：腾讯云 %s\n' "$MIRROR_URL"
+  else
+    printf '   分发已缓存，跳过镜像换源。\n'
+  fi
+fi
+
+GLOG="$REPO/android/.gradle_build.log"
+run_gradle() {
+  ( cd "$REPO/android" && JAVA_HOME="$JDK" "$GRADLE" assembleDebug ) > "$GLOG" 2>&1
+  return $?
+}
+
 printf '   使用：%s（JAVA_HOME=%s）\n' "$GRADLE" "$JDK"
-( cd "$REPO/android" && JAVA_HOME="$JDK" "$GRADLE" assembleDebug )
-grc=$?
+if run_gradle; then
+  grc=0
+else
+  grc=$?
+  if [ -n "$WRAPPER_BAK" ] && [ -f "$WRAPPER_BAK" ] && grep -qiE 'download|connect|unknown host|received fatal|timed out|ssl|resolve|unable to' "$GLOG"; then
+    printf '   [warn] 腾讯云镜像不可用，回退官方源重试。\n'
+    cp -f "$WRAPPER_BAK" "$WRAPPER_PROP"
+    sed -i "s#^distributionUrl=.*#distributionUrl=$DEFAULT_URL#" "$WRAPPER_PROP"
+    if run_gradle; then grc=0; else grc=$?; fi
+  fi
+fi
+
 if [ "$grc" -ne 0 ]; then
-  printf '\360\237\224\264 Gradle 失败（exit=%d）—— 见上面的 Gradle 报错（不是 Go 侧问题）\n' "$grc"
+  printf 'Gradle 失败（exit=%d）—— 详见 %s（不是 Go 侧问题）\n' "$grc" "$GLOG"
   exit "$grc"
 fi
-printf '   \342\234\205 Gradle assembleDebug 完成\n'
+printf '   Gradle assembleDebug 完成\n'
