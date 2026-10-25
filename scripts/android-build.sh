@@ -13,6 +13,10 @@
 #   MYGO_ANDROID_CC                   C 交叉编译器（默认由 NDK 推导）
 #   MYGO_ANDROID_PKG                  默认 Go 包（默认 ./internal/android）
 #   MYGO_ANDROID_SO                   输出 .so 路径
+#   MYGO_ANDROID_PROXY                Gradle 代理 host:port（如 127.0.0.1:20122）；
+#                                    不设在则自动探测 http(s)_proxy 环境变量。
+#                                    有代理时注入 Gradle JVM，分发/依赖走代理直连；
+#                                    无代理时才走腾讯云分发镜像 + 依赖直连。
 #   JAVA_HOME                         Gradle 用的 JDK（默认取平台默认 / java_home）
 #
 # 平台自适应：HOST_TAG / 可执行后缀由 `uname` 推导，Windows(MSYS) 与 macOS/Linux 共用。
@@ -205,14 +209,39 @@ if [ ! -f "$JDK/bin/java" ]; then
   printf '      \342\206\263 \350\241\245\357\274\232设 JAVA_HOME 指向 JDK 17。\n'
 fi
 
+# ---- 代理自动探测 -----------------------------------------------------------
+# AGP/Gradle 的 JVM 默认不读 shell 的 http_proxy 环境变量，必须显式注入
+# systemProp.*（或 GRADLE_OPTS 的 -Dhttp(s).proxy*）才能走代理。这里探测常见
+# 代理变量，或用 MYGO_ANDROID_PROXY 直接指定 host:port；探测到就注入 Gradle JVM，
+# 此时分发与依赖都经代理直连官方源即可，不再走腾讯镜像。无代理时才走腾讯
+# 云分发镜像 + 依赖直连（见下段）。
+PROXY_HOST=""; PROXY_PORT=""
+if [ -n "${MYGO_ANDROID_PROXY:-}" ]; then
+  _p="${MYGO_ANDROID_PROXY#*://}"; _p="${_p#*@}"
+  PROXY_HOST="${_p%%:*}"; PROXY_PORT="${_p##*:}"
+elif [ -n "${https_proxy:-${HTTPS_PROXY:-${http_proxy:-${HTTP_PROXY:-}}}}" ]; then
+  _p="${https_proxy:-${HTTPS_PROXY:-${http_proxy:-$HTTP_PROXY}}}"
+  _p="${_p#*://}"; _p="${_p#*@}"; _p="${_p%%/*}"   # 去 scheme / 认证 / 路径，只留 host:port
+  PROXY_HOST="${_p%%:*}"
+  PROXY_PORT="${_p##*:}"
+fi
+if [ -n "$PROXY_HOST" ] && [ -n "$PROXY_PORT" ] && [ "$PROXY_HOST" != "$PROXY_PORT" ]; then
+  export GRADLE_OPTS="${GRADLE_OPTS:-} -Dhttp.proxyHost=$PROXY_HOST -Dhttp.proxyPort=$PROXY_PORT -Dhttps.proxyHost=$PROXY_HOST -Dhttps.proxyPort=$PROXY_PORT -Dhttp.nonProxyHosts=localhost"
+  PROXY_ACTIVE=1
+  printf '   检测到代理 %s:%s，已注入 Gradle JVM（分发/依赖走代理，不分发镜像）。\n' "$PROXY_HOST" "$PROXY_PORT"
+else
+  PROXY_ACTIVE=0
+fi
+
 # ---- Gradle 分发镜像：腾讯云优先，失败回退国际源 ---------------------------
 # gradlew 按 distributionUrl 计算缓存目录并下载分发包；这里临时把 URL 换成
 # 腾讯云镜像以加速（国内）。若分发已缓存则跳过换源，避免重复下载；若镜像
 # 不可用则换回官方源重试一次。脚本退出（trap）时恢复原 gradle-wrapper.properties。
+# 仅当未检测到代理时才走镜像；有代理时分发直连官方源（见上段）。
 WRAPPER_PROP="$REPO/android/gradle/wrapper/gradle-wrapper.properties"
 WRAPPER_BAK=""
 DIST_BASE="${GRADLE_USER_HOME:-$HOME/.gradle}/wrapper/dists"
-if [ "$GRADLE" = "$REPO/android/gradlew" ] && [ -f "$WRAPPER_PROP" ]; then
+if [ "$PROXY_ACTIVE" -eq 0 ] && [ "$GRADLE" = "$REPO/android/gradlew" ] && [ -f "$WRAPPER_PROP" ]; then
   if ! find "$DIST_BASE" -maxdepth 3 -type d -name 'gradle-[0-9]*' | grep -q .; then
     WRAPPER_BAK="$WRAPPER_PROP.bak"
     cp "$WRAPPER_PROP" "$WRAPPER_BAK"
@@ -227,6 +256,10 @@ if [ "$GRADLE" = "$REPO/android/gradlew" ] && [ -f "$WRAPPER_PROP" ]; then
     printf '   分发镜像：腾讯云 %s\n' "$MIRROR_URL"
   else
     printf '   分发已缓存，跳过镜像换源。\n'
+  fi
+else
+  if [ "$GRADLE" = "$REPO/android/gradlew" ] && [ -f "$WRAPPER_PROP" ]; then
+    printf '   代理已启用，分发保持官方源（经代理下载）。\n'
   fi
 fi
 
