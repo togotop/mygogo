@@ -118,8 +118,7 @@ func axis(c *ui.Context, side Side, ticks []Tick, label func(Side, Tick)) ui.Ele
 		}
 		return t.At
 	}
-	sorted := slices.Clone(ticks)
-	slices.SortStableFunc(sorted, func(a, b Tick) int {
+	cmp := func(a, b Tick) int {
 		switch pa, pb := pos(a), pos(b); {
 		case pa < pb:
 			return -1
@@ -127,7 +126,14 @@ func axis(c *ui.Context, side Side, ticks []Tick, label func(Side, Tick)) ui.Ele
 			return 1
 		}
 		return 0
-	})
+	}
+	// Ticks from a scale are already in order, which is the steady case: a
+	// chart redrawn every frame must not sort a copy it does not need.
+	sorted := ticks
+	if !slices.IsSortedFunc(ticks, cmp) {
+		sorted = slices.Clone(ticks)
+		slices.SortStableFunc(sorted, cmp)
+	}
 	const eps = 1e-4
 	var e ui.Element
 	if vertical {

@@ -48,6 +48,11 @@ type Chart struct {
 	Label  string        // what assistive technology reads as the plot's name
 	Note   string // its description, as "15 s at 1 kHz"
 
+	vx      Range          // the x range of this frame
+	p       *ui.Painter    // the painter of this frame
+	r       ui.Rect        // the plot's box this frame
+	drawFn  func(*ui.Painter, ui.Rect) // ch.paint, made once: it escapes
+	clipFn  func()                     // ch.emit, made once: it escapes
 	px      int            // the plot's pixel width, from the last paint
 	cache   []geom         // per series, keyed by the view, px and data version
 	points  [][][2]float32 // per series, the screen points, reused
@@ -133,13 +138,18 @@ func (ch *Chart) Element(c *ui.Context) ui.Element {
 	ch.yTicks = ch.ticks.left.of(ch.yLo, ch.yHi, 4, false)
 	ch.xTicks = ch.ticks.bottom.of(vx.Lo, vx.Hi, 6, ch.Time)
 	ch.border = c.Theme().Border
+	ch.vx = vx
+	if ch.drawFn == nil { // a steady frame must not allocate these
+		ch.drawFn = ch.paint
+		ch.clipFn = ch.emit
+	}
 	height := ch.Height
 	if height <= 0 {
 		height = 200
 	}
 	return chart.Plot(c, chart.Axes{Left: ch.yTicks, Bottom: ch.xTicks}, func(area ui.Element) {
 		area.Label(ch.Label).Description(ch.Note)
-		area.Draw(func(p *ui.Painter, r ui.Rect) { ch.paint(p, r, vx) })
+		area.Draw(ch.drawFn)
 	}).Height(height).Gap(6)
 }
 
@@ -244,8 +254,9 @@ func (ch *Chart) update(vx Range, px int) {
 }
 
 // paint draws the grid, then every visible series, clipped to the plot.
-func (ch *Chart) paint(p *ui.Painter, r ui.Rect, vx Range) {
+func (ch *Chart) paint(p *ui.Painter, r ui.Rect) {
 	defer probe.Span("plot/paint")()
+	ch.p, ch.r = p, r
 	if w := int(r.W * p.Scale()); w > 0 {
 		ch.px = w
 	}
@@ -253,38 +264,45 @@ func (ch *Chart) paint(p *ui.Painter, r ui.Rect, vx Range) {
 		y := chart.Y(r, t.At)
 		p.Line(r.X, y, r.X+r.W, y, 1, ch.border)
 	}
-	if !vx.Valid() || ch.yHi <= ch.yLo {
+	if !ch.vx.Valid() || ch.yHi <= ch.yLo {
 		return
 	}
-	ch.align()
-	span := vx.Span()
-	yf := func(v float32) float32 { return float32((float64(v) - ch.yLo) / (ch.yHi - ch.yLo)) }
-	p.Clip(r, 0, func() {
-		for i, s := range ch.Series {
-			if s.Hidden || i >= len(ch.cache) {
-				continue
-			}
-			g := &ch.cache[i]
-			if len(g.xs) == 0 {
-				continue
-			}
-			pts := ch.points[i][:0]
-			for j, x := range g.xs {
-				f := float32((x - vx.Lo) / span)
-				pts = append(pts, [2]float32{chart.X(r, f), chart.Y(r, yf(g.lo[j]))})
-				if g.hi[j] != g.lo[j] {
-					pts = append(pts, [2]float32{chart.X(r, f), chart.Y(r, yf(g.hi[j]))})
-				}
-			}
-			ch.points[i] = pts
-			width, col := s.Width, s.Color
-			if width <= 0 {
-				width = 1.5
-			}
-			if col.A == 0 {
-				col = palette[i%len(palette)]
-			}
-			p.StrokePolyline(pts, width, col)
+	p.Clip(r, 0, ch.clipFn)
+}
+
+// yf maps a y value to a fraction up the plot, as the pointer sees it.
+func (ch *Chart) yf(v float32) float32 {
+	return float32((float64(v) - ch.yLo) / (ch.yHi - ch.yLo))
+}
+
+// emit draws the series' cached columns as screen points, inside the clip.
+func (ch *Chart) emit() {
+	p, r := ch.p, ch.r
+	span := ch.vx.Span()
+	for i, s := range ch.Series {
+		if s.Hidden || i >= len(ch.cache) {
+			continue
 		}
-	})
+		g := &ch.cache[i]
+		if len(g.xs) == 0 {
+			continue
+		}
+		pts := ch.points[i][:0]
+		for j, x := range g.xs {
+			f := float32((x - ch.vx.Lo) / span)
+			pts = append(pts, [2]float32{chart.X(r, f), chart.Y(r, ch.yf(g.lo[j]))})
+			if g.hi[j] != g.lo[j] {
+				pts = append(pts, [2]float32{chart.X(r, f), chart.Y(r, ch.yf(g.hi[j]))})
+			}
+		}
+		ch.points[i] = pts
+		width, col := s.Width, s.Color
+		if width <= 0 {
+			width = 1.5
+		}
+		if col.A == 0 {
+			col = palette[i%len(palette)]
+		}
+		p.StrokePolyline(pts, width, col)
+	}
 }
