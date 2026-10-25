@@ -2,7 +2,7 @@ package plot
 
 import (
 	"fmt"
-	"strconv"
+	"strings"
 
 	"github.com/egoist/mygo/ui"
 )
@@ -105,22 +105,30 @@ func (ch *Chart) topRow(c *ui.Context) {
 	})
 }
 
-// describe says what the cursor is on, for assistive technology.
+// describe says what the cursor is on and what the markers measure, for
+// assistive technology.
 func (ch *Chart) describe() string {
-	if !ch.cursorOn {
-		return ""
-	}
-	out := ""
-	for i, s := range ch.Series {
-		if s.Hidden {
-			continue
-		}
-		if v, ok := ch.stamp(s); ok {
-			if out != "" {
-				out += ", "
+	var parts []string
+	if ch.cursorOn {
+		for i, s := range ch.Series {
+			if s.Hidden {
+				continue
 			}
-			out += name(i, s) + " " + strconv.FormatFloat(float64(v), 'f', 3, 32)
+			if v, ok := ch.stamp(s); ok {
+				parts = append(parts, name(i, s)+" "+num(float64(v)))
+			}
 		}
 	}
-	return out
+	if ch.Measure && ch.mSet {
+		parts = append(parts, "Δx "+num(ch.mB-ch.mA))
+		for i, s := range ch.Series {
+			if s.Hidden {
+				continue
+			}
+			if d, ok := ch.delta(s); ok {
+				parts = append(parts, name(i, s)+" Δ"+num(float64(d)))
+			}
+		}
+	}
+	return strings.Join(parts, ", ")
 }

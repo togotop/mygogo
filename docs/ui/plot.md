@@ -170,9 +170,11 @@ ch.Cursor, ch.Legend = true, true
 
 `Measure` puts two markers a third of the view apart. Dragging one moves it;
 everything else on the plot still zooms and pans, and a press within a few
-pixels of a marker drags it instead. The row above the plot reads the change
-in x, and each series' change between the markers, as an oscilloscope's
-cursors do.
+pixels of a marker drags it instead. A marker snaps to the nearest sample of
+the first series with an even grid, so the distance between two is a whole
+number of samples—the period of a wave, when the markers are one cycle apart.
+The row above the plot reads the change in x, and each series' change between
+the markers, as an oscilloscope's cursors do.
 
 ```go
 ch.Measure = true
@@ -204,6 +206,10 @@ Samples decimate to at most two points per pixel column, so a line never
 carries more than the plot can show, and a narrow spike is never lost: the
 extremes of each column are what is drawn.
 
+A live frame—four channels at 20 kHz, a second pinned, a new column per
+frame—is about **1 ms** and 18 allocations, most of them the ticks a moving
+view recomputes (`BenchmarkPlotStreamingFrame`).
+
 The first frame at a million samples builds the pyramid: about 2.7 ms a
 series, once. A series that grows every frame decimates its samples
 directly — the pyramid is for a column that stays put.
@@ -213,6 +219,5 @@ mask, which is much slower than the GPU capsules that `StrokePolyline` draws.
 
 ## What it leaves out
 
-More than two y axes, bands and annotations, snapping a marker to the
-nearest sample, and exporting an image. `ui/chart` has the parts for those; `plot` keeps to
+More than two y axes, bands and annotations, and exporting an image. `ui/chart` has the parts for those; `plot` keeps to
 the waveform.

@@ -17,8 +17,8 @@ func (ch *Chart) placeMarkers() {
 	if !ch.Measure || ch.mSet || !ch.vx.Valid() {
 		return
 	}
-	ch.mA = ch.vx.Lo + ch.vx.Span()/3
-	ch.mB = ch.vx.Lo + 2*ch.vx.Span()/3
+	ch.mA = ch.snap(ch.vx.Lo + ch.vx.Span()/3)
+	ch.mB = ch.snap(ch.vx.Lo + 2*ch.vx.Span()/3)
 	ch.mSet = true
 }
 
@@ -50,15 +50,30 @@ func (ch *Chart) grabMarker(local float32) bool {
 	return true
 }
 
-// moveMarker drags the grabbed marker to local.
+// moveMarker drags the grabbed marker to local, on the sample grid.
 func (ch *Chart) moveMarker(local float32) {
-	x := ch.xAt(float64(local))
+	x := ch.snap(ch.xAt(float64(local)))
 	switch ch.mDrag {
 	case 1:
 		ch.mA = x
 	case 2:
 		ch.mB = x
 	}
+}
+
+// snap moves x to the nearest sample of the first visible series that has
+// an even grid: a marker on a sample reads that sample, and the distance
+// between two of them is a whole number of samples.
+func (ch *Chart) snap(x float64) float64 {
+	for _, s := range ch.Series {
+		if s.Hidden || s.Count() == 0 || s.X != nil || s.Dx <= 0 {
+			continue
+		}
+		i := math.Round((x - s.X0) / s.Dx)
+		i = math.Max(0, math.Min(float64(s.Count()-1), i))
+		return s.X0 + i*s.Dx
+	}
+	return x
 }
 
 // drawMarkers draws the two markers and their letters.

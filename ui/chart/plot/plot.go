@@ -221,9 +221,9 @@ func (ch *Chart) plot(c *ui.Context) ui.Element {
 		ch.keys(area)
 		if ch.Cursor {
 			ch.track(area)
-			if desc := ch.describe(); desc != "" {
-				area.Value(desc)
-			}
+		}
+		if desc := ch.describe(); desc != "" {
+			area.Value(desc)
 		}
 		area.Draw(ch.drawFn)
 	}).Height(height).Gap(6)
