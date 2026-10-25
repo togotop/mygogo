@@ -433,3 +433,24 @@ func TestSelect(t *testing.T) {
 		t.Errorf("left from none chose %d", selected)
 	}
 }
+
+func TestTimeMicrosecondTicks(t *testing.T) {
+	from := time.Date(2026, 3, 5, 9, 14, 0, 120_000, time.UTC) // .000120
+	ticks := NewTime(from, from.Add(750*time.Microsecond)).Ticks(5)
+	var labels []string
+	var micros []int64
+	for _, tick := range ticks {
+		labels = append(labels, tick.Label)
+		micros = append(micros, int64(math.Round(tick.Value*1000)))
+	}
+	if got := strings.Join(labels, " "); got != ".000200 .000400 .000600 .000800" {
+		t.Fatalf("labels %q", got)
+	}
+	want := []int64{200, 400, 600, 800} // microseconds into the second
+	for i := range want {
+		if micros[i]%1000 != want[i]%1000 {
+			t.Fatalf("values %v, want %v", micros, want)
+		}
+	}
+}
+

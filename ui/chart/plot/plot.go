@@ -45,14 +45,21 @@ type Chart struct {
 	Time   bool          // x is seconds since the epoch, for the axis' ticks
 	Follow time.Duration // >0: pin the newest this long, in seconds of x
 	View   Viewport      // the user's zoom; a zero X fits the data
+	Cursor bool          // a crosshair at the pointer, reading the series there
+	Legend bool          // a row above the plot naming the series and their values
 	Label  string        // what assistive technology reads as the plot's name
 	Note   string // its description, as "15 s at 1 kHz"
 
 	vx      Range          // the x range of this frame
 	p       *ui.Painter    // the painter of this frame
 	r       ui.Rect        // the plot's box this frame
-	drawFn  func(*ui.Painter, ui.Rect) // ch.paint, made once: it escapes
-	clipFn  func()                     // ch.emit, made once: it escapes
+	drawFn  func(*ui.Painter, ui.Rect)      // ch.paint, made once: it escapes
+	clipFn  func()                          // ch.emit, made once: it escapes
+	inputFn func(ui.InputEvent) bool        // ch.input, made once: it escapes
+	drag    dragState
+	band    ui.Color // the drag's selection band
+	cursorOn bool
+	cursorX  float64 // the pointer's x, in data units
 	px      int            // the plot's pixel width, from the last paint
 	cache   []geom         // per series, keyed by the view, px and data version
 	points  [][][2]float32 // per series, the screen points, reused
@@ -138,17 +145,38 @@ func (ch *Chart) Element(c *ui.Context) ui.Element {
 	ch.yTicks = ch.ticks.left.of(ch.yLo, ch.yHi, 4, false)
 	ch.xTicks = ch.ticks.bottom.of(vx.Lo, vx.Hi, 6, ch.Time)
 	ch.border = c.Theme().Border
+	ch.band = c.Theme().Accent.Alpha(0.18)
 	ch.vx = vx
 	if ch.drawFn == nil { // a steady frame must not allocate these
 		ch.drawFn = ch.paint
 		ch.clipFn = ch.emit
+		ch.inputFn = ch.input
 	}
+	if ch.Legend {
+		return ui.Column(c).Gap(4).Children(func() {
+			ch.legendRow(c)
+			ch.plot(c)
+		})
+	}
+	return ch.plot(c)
+}
+
+// plot builds the grid, the axes and the area the series are drawn in.
+func (ch *Chart) plot(c *ui.Context) ui.Element {
 	height := ch.Height
 	if height <= 0 {
 		height = 200
 	}
 	return chart.Plot(c, chart.Axes{Left: ch.yTicks, Bottom: ch.xTicks}, func(area ui.Element) {
 		area.Label(ch.Label).Description(ch.Note)
+		area.Focusable().HandleInput(ch.inputFn)
+		ch.keys(area)
+		if ch.Cursor {
+			ch.track(area)
+			if desc := ch.describe(); desc != "" {
+				area.Value(desc)
+			}
+		}
 		area.Draw(ch.drawFn)
 	}).Height(height).Gap(6)
 }
@@ -266,6 +294,28 @@ func (ch *Chart) paint(p *ui.Painter, r ui.Rect) {
 	}
 	if !ch.vx.Valid() || ch.yHi <= ch.yLo {
 		return
+	}
+	if ch.cursorOn && ch.cursorX >= ch.vx.Lo && ch.cursorX <= ch.vx.Hi {
+		f := float32((ch.cursorX - ch.vx.Lo) / ch.vx.Span())
+		x := chart.X(r, f)
+		p.Line(x, r.Y, x, r.Y+r.H, 1, ch.border)
+		for i, s := range ch.Series {
+			if s.Hidden {
+				continue
+			}
+			if v, ok := ch.stamp(s); ok {
+				y := chart.Y(r, ch.yf(v))
+				p.Fill(ui.Rect{X: x - 2, Y: y - 2, W: 4, H: 4}, color(i, s), 2)
+			}
+		}
+	}
+	if ch.drag.active && !ch.drag.pan { // the range a drag selects
+		x0 := (ch.drag.fromX - ch.vx.Lo) / ch.vx.Span()
+		x1 := (ch.drag.toX - ch.vx.Lo) / ch.vx.Span()
+		lo, hi := min(x0, x1), max(x0, x1)
+		if hi > lo {
+			p.Fill(ui.Rect{X: chart.X(r, float32(lo)), Y: r.Y, W: float32(hi-lo) * r.W, H: r.H}, ch.band, 0)
+		}
 	}
 	p.Clip(r, 0, ch.clipFn)
 }

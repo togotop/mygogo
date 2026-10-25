@@ -46,6 +46,7 @@ type unit int
 
 const (
 	unitMilli unit = iota
+	unitMicro
 	unitSecond
 	unitMinute
 	unitHour
@@ -91,8 +92,17 @@ func tickInterval(lo, hi time.Time, count int) interval {
 		n := tickStep(float64(lo.Year()), float64(hi.Year())+float64(hi.YearDay())/366, float64(count))
 		return interval{unitYear, max(1, int(math.Round(n))), year}
 	case i == 0:
-		n := tickStep(0, float64(hi.Sub(lo).Milliseconds()), float64(count))
-		return interval{unitMilli, max(1, int(math.Round(n))), time.Millisecond}
+		// Below a second, milliseconds; below a millisecond, microseconds,
+		// which a waveform zoomed into its samples needs.
+		if ms := hi.Sub(lo).Milliseconds(); ms >= 1 {
+			n := tickStep(0, float64(ms), float64(count))
+			return interval{unitMilli, max(1, int(math.Round(n))), time.Millisecond}
+		}
+		n := 1.0
+		if us := hi.Sub(lo).Microseconds(); us >= 1 {
+			n = tickStep(0, float64(us), float64(count))
+		}
+		return interval{unitMicro, max(1, int(math.Round(n))), time.Microsecond}
 	}
 	if float64(target)/float64(intervals[i-1].d) < float64(intervals[i].d)/float64(target) {
 		return intervals[i-1]
@@ -110,6 +120,9 @@ func (iv interval) floor(t time.Time) time.Time {
 	case unitMilli:
 		ms := t.Nanosecond() / 1e6
 		return time.Date(y, mo, d, h, mi, s, (ms-ms%iv.n)*1e6, loc)
+	case unitMicro:
+		us := t.Nanosecond() / 1e3
+		return time.Date(y, mo, d, h, mi, s, (us-us%iv.n)*1e3, loc)
 	case unitSecond:
 		return time.Date(y, mo, d, h, mi, s-s%iv.n, 0, loc)
 	case unitMinute:
@@ -133,6 +146,8 @@ func (iv interval) next(t time.Time) time.Time {
 	switch iv.u {
 	case unitMilli:
 		return t.Add(time.Duration(iv.n) * time.Millisecond)
+	case unitMicro:
+		return t.Add(time.Duration(iv.n) * time.Microsecond)
 	case unitSecond, unitMinute:
 		return t.Add(iv.d)
 	case unitHour:
@@ -174,7 +189,9 @@ func (s Time) Ticks(count int) []Tick {
 	t := iv.floor(lo)
 	for !t.After(hi) && len(out) < 1000 {
 		if !t.Before(lo) {
-			out = append(out, Tick{At: s.At(t), Value: float64(t.UnixMilli()), Label: format(t)})
+			// Value is milliseconds; a tick below one carries its fraction,
+			// since int64(t.UnixMilli()) would round them all together.
+			out = append(out, Tick{At: s.At(t), Value: float64(t.UnixNano()) / 1e6, Label: format(t)})
 		}
 		t = iv.next(t)
 	}
@@ -191,8 +208,10 @@ func (s Time) Ticks(count int) []Tick {
 func formatTime(t time.Time) string {
 	_, mo, d := t.Date()
 	h, mi, s := t.Clock()
-	switch {
-	case t.Nanosecond() != 0:
+	switch ns := t.Nanosecond(); {
+	case ns%1e6 != 0:
+		return t.Format(".000000") // microseconds
+	case ns != 0:
 		return t.Format(".000")
 	case s != 0:
 		return t.Format(":05")

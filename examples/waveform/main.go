@@ -46,7 +46,8 @@ func main() {
 	probeOn := flag.Bool("probe", false, "print the plot's spans once a second")
 	flag.Parse()
 
-	ch := &plot.Chart{Height: 320, Label: "Four waves", Note: "four series of a million samples"}
+	ch := &plot.Chart{Height: 320, Cursor: true, Legend: true,
+		Label: "Four waves", Note: "four series of a million samples"}
 	for s := range 4 {
 		ch.Series = append(ch.Series, &plot.Series{
 			Name: fmt.Sprintf("channel %d", s+1),
