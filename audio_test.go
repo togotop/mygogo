@@ -38,7 +38,7 @@ func TestAudioOnAPlatformWithoutControls(t *testing.T) {
 	if err := Audio.SetMuted(true); !errors.Is(err, platform.ErrUnsupported) {
 		t.Errorf("SetMuted = %v, want ErrUnsupported", err)
 	}
-	if err := Audio.Press(MediaPlayPause); !errors.Is(err, platform.ErrUnsupported) {
+	if err := Audio.Press(KeyPlayPause); !errors.Is(err, platform.ErrUnsupported) {
 		t.Errorf("Press = %v, want ErrUnsupported", err)
 	}
 	if err := Audio.SetRingerMode(RingerVibrate); !errors.Is(err, platform.ErrUnsupported) {

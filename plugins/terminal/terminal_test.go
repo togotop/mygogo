@@ -1452,6 +1452,41 @@ func TestCommandClickLinks(t *testing.T) {
 	}
 }
 
+// Command-hover underlines the same cells that Command-click opens,
+// including bare filenames and paths to ignored output directories.
+func TestCommandHoverFilePath(t *testing.T) {
+	loadLib(t)
+	for _, path := range []string{"notes.md", ".log-outputs/takumi-session-analysis.md"} {
+		t.Run(path, func(t *testing.T) {
+			term, err := New(Options{Conn: newPipe(), OpenLink: func(string) bool { return true }})
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer term.Close()
+			term.Feed([]byte("write(" + path + ")\r\n"))
+			tt := ui.NewTester(func(c *ui.Context) { View(c, term).Fill() }, 800, 200)
+			tt.Frame()
+			x, y := cellCenter(term, 8, 0)
+			tt.Move(x, y)
+			plain := slices.Clone(tt.Image().Pix)
+			tt.HoldModifiers(ui.Cmd)
+			if h := term.v.hover; h != (linkSpan{0, 6, 6 + len(path)}) {
+				t.Fatalf("hovered %+v, want the file path's cells", h)
+			}
+			if tt.Cursor() != ui.CursorPointer {
+				t.Error("hovering a file path with Command did not show a hand")
+			}
+			if bytes.Equal(plain, tt.Image().Pix) {
+				t.Error("hovering a file path with Command did not paint its underline")
+			}
+			tt.HoldModifiers(0)
+			if term.v.hover.on() || !bytes.Equal(plain, tt.Image().Pix) {
+				t.Error("releasing Command did not remove the underline")
+			}
+		})
+	}
+}
+
 // TestCommandClickLinkWithoutOpenLink: without Options.OpenLink, the system
 // opens hyperlinks of any scheme, paths are no links, the pointer is a hand
 // over a link while Command is held, and a click on a link goes before a
@@ -1850,6 +1885,59 @@ func TestOnZoom(t *testing.T) {
 	}
 	if term.v.font.size != 13 {
 		t.Errorf("a zoom OnZoom took changed the font to %v", term.v.font.size)
+	}
+}
+
+// A touchpad scroll that began without Command keeps scrolling, even after
+// the fingers leave it and Command comes down while its momentum runs.
+func TestOnZoomIgnoresMomentum(t *testing.T) {
+	loadLib(t)
+	var zooms []Zoom
+	var scrolls []int
+	term, err := New(Options{
+		Conn:     newPipe(),
+		OnZoom:   func(z Zoom) bool { zooms = append(zooms, z); return true },
+		OnScroll: func(rows int) bool { scrolls = append(scrolls, rows); return true },
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer term.Close()
+	tt := ui.NewTester(func(c *ui.Context) { View(c, term).Fill().AutoFocus() }, 400, 200)
+	var b strings.Builder
+	for i := range 100 {
+		b.WriteString("line " + itoa(i) + "\r\n")
+	}
+	term.Feed([]byte(b.String()))
+	tt.Frame()
+	term.v.scroll(ui.InputEvent{Kind: ui.InputScroll, DY: -40, Precise: true})
+	term.v.scroll(ui.InputEvent{Kind: ui.InputScroll, DY: -40, Mods: ui.Cmd, Precise: true, Momentum: true})
+	if zooms != nil {
+		t.Errorf("momentum scrolling zoomed %v", zooms)
+	}
+	if len(scrolls) != 2 || scrolls[0] >= 0 || scrolls[1] >= 0 {
+		t.Errorf("momentum scrolling scrolled %v, want two scrolls up", scrolls)
+	}
+}
+
+// Command at the start of a touchpad scroll zooms through its momentum.
+func TestOnZoomKeepsMomentumOfZoomGesture(t *testing.T) {
+	loadLib(t)
+	var zooms []Zoom
+	term, err := New(Options{
+		Conn:   newPipe(),
+		OnZoom: func(z Zoom) bool { zooms = append(zooms, z); return true },
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer term.Close()
+	tt := ui.NewTester(func(c *ui.Context) { View(c, term).Fill().AutoFocus() }, 400, 200)
+	tt.Frame()
+	term.v.scroll(ui.InputEvent{Kind: ui.InputScroll, DY: -40, Mods: ui.Cmd, Precise: true})
+	term.v.scroll(ui.InputEvent{Kind: ui.InputScroll, DY: -40, Mods: ui.Cmd, Precise: true, Momentum: true})
+	if !slices.Equal(zooms, []Zoom{{Steps: 1}, {Steps: 1}}) {
+		t.Errorf("momentum scrolling zoomed %v, want two steps up", zooms)
 	}
 }
 

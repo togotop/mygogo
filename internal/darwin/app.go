@@ -101,6 +101,20 @@ func (b *Backend) Init(h platform.AppHandler, opts platform.AppOptions) error {
 	theBackend = b
 	registerClasses()
 
+	// AppKit's AutoFill heuristics watch every text input client for
+	// contact and password fields, in a helper process ("AutoFill (App)")
+	// and with sync calls that cost CPU and stall scrolling on macOS 26.
+	// MyGo draws its own text fields, which never take those suggestions.
+	// Ghostty, Zed and Chromium turn it off the same way. macOS 26 reads
+	// NSAutoFillHeuristicControllerEnabled; macOS 27 reads only
+	// NSAutoFillHeuristicsEnabled, and without it starts Safari's AutoFill
+	// helper as soon as a view takes text input.
+	no := nsBool(false)
+	send(send(class("NSUserDefaults"), "standardUserDefaults"), "registerDefaults:",
+		uintptr(send(class("NSDictionary"), "dictionaryWithObjects:forKeys:",
+			uintptr(nsArray(no, no)),
+			uintptr(nsArray(nsString("NSAutoFillHeuristicControllerEnabled"), nsString("NSAutoFillHeuristicsEnabled"))))))
+
 	b.app = send(class("NSApplication"), "sharedApplication")
 	send(b.app, "setActivationPolicy:", activationPolicy(opts.ActivationPolicy))
 	// No automatic "Show Tab Bar" items and window tabbing.
@@ -345,6 +359,7 @@ func registerAppDelegate() {
 		method("applicationShouldTerminateAfterLastWindowClosed:", func(self id, _ objc.SEL, app id) bool { return false }),
 		method("observeValueForKeyPath:ofObject:change:context:", func(self id, _ objc.SEL, keyPath, object, change id, ctx uintptr) {
 			if goString(keyPath) == "effectiveAppearance" {
+				theBackend.refreshSystemBackings()
 				theBackend.h.ThemeChanged()
 			}
 		}),
@@ -352,6 +367,7 @@ func registerAppDelegate() {
 			theBackend.h.DisplaysChanged()
 		}),
 		method("preferencesChanged:", func(self id, _ objc.SEL, n id) {
+			theBackend.refreshSystemBackings()
 			theBackend.h.ThemeChanged()
 		}),
 		method("localeChanged:", func(self id, _ objc.SEL, n id) {

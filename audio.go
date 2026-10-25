@@ -28,14 +28,14 @@ const (
 type MediaKey string
 
 const (
-	MediaPlayPause MediaKey = "play-pause"
-	MediaPlay      MediaKey = "play"
-	MediaPause     MediaKey = "pause"
-	MediaNext      MediaKey = "next"
-	MediaPrevious  MediaKey = "previous"
-	MediaStop      MediaKey = "stop"
-	MediaForward   MediaKey = "forward"
-	MediaRewind    MediaKey = "rewind"
+	KeyPlayPause MediaKey = "play-pause"
+	KeyPlay      MediaKey = "play"
+	KeyPause     MediaKey = "pause"
+	KeyNext      MediaKey = "next"
+	KeyPrevious  MediaKey = "previous"
+	KeyStop      MediaKey = "stop"
+	KeyForward   MediaKey = "forward"
+	KeyRewind    MediaKey = "rewind"
 )
 
 // AudioModule is the phone's media volume and transport keys: what a control
@@ -104,7 +104,7 @@ func (a *AudioModule) SetMuted(on bool) error {
 func (a *AudioModule) Press(key MediaKey) error {
 	needsApp("Audio.Press")
 	switch key {
-	case MediaPlayPause, MediaPlay, MediaPause, MediaNext, MediaPrevious, MediaStop, MediaForward, MediaRewind:
+	case KeyPlayPause, KeyPlay, KeyPause, KeyNext, KeyPrevious, KeyStop, KeyForward, KeyRewind:
 	default:
 		return fmt.Errorf("mygo: unknown media key %q", key)
 	}

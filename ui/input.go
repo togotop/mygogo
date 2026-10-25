@@ -97,7 +97,7 @@ func (rt *engine) event(ev platform.SurfaceEvent) (taken bool) {
 			rt.dismissKeyboardOnDrag()
 		}
 		rt.pointerMove(x, y)
-		rt.scroll(float32(ev.DX), float32(ev.DY), Modifiers(ev.Mods), ev.Precise)
+		rt.scroll(float32(ev.DX), float32(ev.DY), Modifiers(ev.Mods), ev.Precise, ev.Momentum)
 	case platform.PointerZoom:
 		rt.pointerMove(x, y)
 		rt.zoom(float32(ev.Scale), Modifiers(ev.Mods))
@@ -364,6 +364,8 @@ func (rt *engine) pointerMove(x, y float32) {
 const interactive = flagClickable | flagFocusable | flagEditable | flagSelectable | flagDragWindow | flagDraggable | flagTrackPointer
 
 func (rt *engine) pointerDown(x, y float32, button int, mods Modifiers, clicks int) {
+	rt.downing++
+	defer rt.endDown()
 	chain := rt.hitChain(x, y)
 	rt.setHover(chain)
 	rt.pressDragger = 0
@@ -453,6 +455,19 @@ func (rt *engine) pointerDown(x, y float32, button int, mods Modifiers, clicks i
 	}
 }
 
+// endDown applies the releases that came while pointerDown handled a
+// press.
+func (rt *engine) endDown() {
+	if rt.downing--; rt.downing > 0 {
+		return
+	}
+	for len(rt.ups) > 0 {
+		up := rt.ups[0]
+		rt.ups = rt.ups[1:]
+		rt.pointerUp(up[0], up[1])
+	}
+}
+
 // countPress counts the backend's n-th quick press from the first on the
 // element pressed: the innermost of the target and the handler, so that
 // two handlers in one focusable element, or two buttons in one handler,
@@ -474,6 +489,10 @@ func (rt *engine) countPress(chain []uint64, target, h *state, n int) int {
 }
 
 func (rt *engine) pointerUp(button, clicks int) {
+	if rt.downing > 0 {
+		rt.ups = append(rt.ups, [2]int{button, clicks})
+		return
+	}
 	if button == rt.pressButton {
 		clicks = rt.pressClicks // the engine's, which may have started over
 	}
@@ -532,10 +551,10 @@ func (rt *engine) pointerUp(button, clicks int) {
 	rt.requestFrame()
 }
 
-func (rt *engine) scroll(dx, dy float32, mods Modifiers, precise bool) {
+func (rt *engine) scroll(dx, dy float32, mods Modifiers, precise, momentum bool) {
 	chain := rt.appendHitChain(rt.chain[:0], rt.pointerX, rt.pointerY)
 	rt.chain = chain[:0]
-	if h := rt.handler(chain); h != nil && rt.deliver(h, InputEvent{Kind: InputScroll, DX: dx, DY: dy, Mods: mods, Precise: precise}) {
+	if h := rt.handler(chain); h != nil && rt.deliver(h, InputEvent{Kind: InputScroll, DX: dx, DY: dy, Mods: mods, Precise: precise, Momentum: momentum}) {
 		return
 	}
 	// Shift turns the wheel sideways: down is toward the end, which is

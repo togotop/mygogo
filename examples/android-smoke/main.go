@@ -235,7 +235,7 @@ func (s *smoke) verifyLocal() {
 	if err := mygo.Audio.Adjust(-2); err != nil {
 		s.add("Audio.Adjust(-2) -> %v", err)
 	}
-	if err := mygo.Audio.Press(mygo.MediaPlayPause); err != nil {
+	if err := mygo.Audio.Press(mygo.KeyPlayPause); err != nil {
 		s.add("Audio.Press(play-pause) -> %v", err)
 	} else {
 		s.add("Audio.Press(play-pause) -> ok")

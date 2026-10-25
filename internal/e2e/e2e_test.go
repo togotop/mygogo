@@ -707,6 +707,98 @@ func TestVibrancy(t *testing.T) {
 	}
 }
 
+// TestGlass gives a frameless window of native UI Liquid Glass, clear, cut
+// to its corners (macOS 26; the HUD material before), which SetActiveAppearance
+// keeps drawn as active once another app is in front, as a floating panel's
+// must be for the clear glass to stay clear. SetVibrancy swaps the glass for another
+// material, which keeps the corners, and back.
+func TestGlass(t *testing.T) {
+	view := ui.View(func(c *ui.Context) { c.Root().Background(ui.Transparent) })
+	w := newWindow(t, mygo.WindowOptions{Width: 300, Height: 200, Frameless: true, Transparent: true,
+		Vibrancy: mygo.VibrancyGlassClear, CornerRadius: 16, Content: view})
+	w.SetActiveAppearance(true)
+	class, style, radius, _, ok := material(w)
+	if !ok {
+		t.Skip("the material is macOS's")
+	}
+	glass := class == "NSGlassEffectView"
+	if !glass && class != "NSVisualEffectView" || glass && style != 1 || radius != 16 {
+		t.Errorf("material %s, style %d, corners %v; want the clear glass, or the HUD material before macOS 26, cut to 16", class, style, radius)
+	}
+	// Without SetActiveAppearance, a window draws as inactive once the app is.
+	other := newWindow(t, mygo.WindowOptions{Width: 200, Height: 100, Frameless: true, Transparent: true, Vibrancy: mygo.VibrancyGlassClear, Content: view})
+	if deactivateApp() {
+		eventually(t, "the app deactivated", func() bool { active, _ := appActive(); return !active })
+		if _, _, _, active, _ := material(w); !active {
+			t.Error("with another app in front, the window no longer draws as active")
+		}
+		if _, _, _, active, _ := material(other); active {
+			t.Error("a window without SetActiveAppearance draws as active with another app in front")
+		}
+	}
+	w.SetVibrancy(mygo.VibrancyPopover)
+	if class, _, radius, _, _ := material(w); class != "NSVisualEffectView" || radius != 16 {
+		t.Errorf("popover: material %s, corners %v", class, radius)
+	}
+	w.SetVibrancy(mygo.VibrancyGlass)
+	if class, style, _, _, _ := material(w); glass && (class != "NSGlassEffectView" || style != 0) {
+		t.Errorf("regular glass: material %s, style %d", class, style)
+	}
+	w.SetVibrancy(mygo.VibrancyNone)
+	if class, _, _, _, _ := material(w); class != "" {
+		t.Errorf("no material: %s", class)
+	}
+}
+
+// TestRoundedOpaqueWindow rounds a frameless window that is not
+// transparent: the window is made clear and its color goes to the content
+// view, cut to the corners, so that nothing fills them, the color set later
+// too (macOS).
+func TestRoundedOpaqueWindow(t *testing.T) {
+	w := newWindow(t, mygo.WindowOptions{Width: 300, Height: 200, Frameless: true, CornerRadius: 12, BackgroundColor: "#ff0000",
+		Content: ui.View(func(c *ui.Context) { c.Root().Background(ui.Transparent) })})
+	opaque, alpha, _, ok := roundedBacking(w)
+	if !ok {
+		t.Skip("the corners are cut on macOS")
+	}
+	if _, _, radius, _, _ := material(w); opaque || alpha != 1 || radius != 12 {
+		t.Errorf("opaque %v, the content view's color's alpha %v, corners %v; want a clear window, its color on the content view, cut to 12", opaque, alpha, radius)
+	}
+	w.SetBackgroundColor("#00ff0080")
+	if opaque, alpha, _, _ := roundedBacking(w); opaque || alpha < .49 || alpha > .51 {
+		t.Errorf("after SetBackgroundColor: opaque %v, alpha %v; want a clear window, the new color on the content view", opaque, alpha)
+	}
+}
+
+// TestRoundedSystemBacking rounds a frameless window without a
+// BackgroundColor: its content view takes the system's window color, which
+// follows the appearance as the window's did, light and then dark (macOS).
+func TestRoundedSystemBacking(t *testing.T) {
+	mygo.Theme.SetSource(mygo.ThemeLight)
+	defer mygo.Theme.SetSource(mygo.ThemeSystem)
+	w := newWindow(t, mygo.WindowOptions{Width: 300, Height: 200, Frameless: true, CornerRadius: 12,
+		Content: ui.View(func(c *ui.Context) { c.Root().Background(ui.Transparent) })})
+	opaque, alpha, light, ok := roundedBacking(w)
+	if !ok {
+		t.Skip("the corners are cut on macOS")
+	}
+	if opaque || alpha != 1 || light < .5 {
+		t.Errorf("light: opaque %v, alpha %v, red %v; want a clear window, a light window color on the content view", opaque, alpha, light)
+	}
+	mygo.Theme.SetSource(mygo.ThemeDark)
+	eventually(t, "the window color turned dark", func() bool {
+		_, alpha, red, _ := roundedBacking(w)
+		return alpha == 1 && red < .5
+	})
+	// A color of the app's own stays, whatever the appearance.
+	w.SetBackgroundColor("#ff0000")
+	mygo.Theme.SetSource(mygo.ThemeLight)
+	eventually(t, "the app is light again", func() bool { return !mygo.Theme.IsDark() })
+	if _, alpha, red, _ := roundedBacking(w); alpha != 1 || red != 1 {
+		t.Errorf("after SetBackgroundColor and a light appearance: alpha %v, red %v; want the app's red", alpha, red)
+	}
+}
+
 // On Windows, a window with a material behind its page has no redirection
 // bitmap, which hides what GDI draws: the controls of a hidden title bar
 // show through DirectComposition, in every window again once its device
@@ -1376,6 +1468,44 @@ func TestWindowState(t *testing.T) {
 	})
 }
 
+// TestCloseInFrame closes a window from its own content as it builds a
+// frame, as a close button does, twice, and its state is still saved.
+func TestCloseInFrame(t *testing.T) {
+	run := strconv.Itoa(int(windowStateRuns.Add(1)))
+	mygo.App.SetPath(mygo.PathUserData, t.TempDir())
+	defer mygo.App.SetPath(mygo.PathUserData, "")
+	var self atomic.Pointer[mygo.Window]
+	var frames, closes atomic.Int32
+	w := newWindow(t, mygo.WindowOptions{StateKey: "e2e-close-" + run, Width: 320, Height: 240, Content: ui.View(func(c *ui.Context) {
+		if frames.Add(1) >= 2 {
+			if w := self.Load(); w != nil {
+				w.Close()
+				w.Close()
+			}
+		}
+		c.AnimationFrame()
+		ui.Box(c).Fill().Background(ui.RGB(255, 255, 255))
+	})})
+	w.OnClosed(func() { closes.Add(1) })
+	self.Store(w)
+	eventually(t, "the window closed", w.IsDestroyed)
+
+	var later atomic.Int32
+	other := newWindow(t, mygo.WindowOptions{Width: 200, Height: 150, Content: ui.View(func(c *ui.Context) {
+		later.Add(1)
+		ui.Box(c).Fill()
+	})})
+	eventually(t, "a frame of another window", func() bool { return later.Load() > 0 })
+	other.Destroy()
+	if n := closes.Load(); n != 1 {
+		t.Errorf("OnClosed ran %d times, want 1", n)
+	}
+	w = newWindow(t, mygo.WindowOptions{StateKey: "e2e-close-" + run, Width: 100, Height: 100})
+	if b := w.Bounds(); b.Width != 320 || b.Height != 240 {
+		t.Errorf("restored bounds = %+v, want 320×240", b)
+	}
+}
+
 // TestFileDrop drops files with synthetic DOM events, the platform side
 // being played by a test hook, and checks that the page's own drag and
 // drop is undisturbed.
@@ -1875,7 +2005,23 @@ func TestClearBrowsingData(t *testing.T) {
 		t.Fatal(err)
 	}
 	waitFor(t, w, `window.run`)
-	mustEval(t, w, `(localStorage.setItem("token", "secret"), window.oldPage = true)`)
+	observer := newWindow(t, mygo.WindowOptions{Hidden: true})
+	if err := observer.Page().LoadURL("app://localhost/"); err != nil {
+		t.Fatal(err)
+	}
+	waitFor(t, observer, `window.run`)
+	mustEval(t, observer, `(() => {
+		localStorage.getItem("token");
+		window.stored = false;
+		addEventListener("storage", e => {
+			if (e.key === "token" && e.newValue === "secret") window.stored = true;
+		});
+		return true;
+	})()`)
+	// Eval waits for JavaScript, not for the storage process to apply its
+	// writes. Observe the write from another page before asking to delete it.
+	mustEval(t, w, `(localStorage.removeItem("token"), localStorage.setItem("token", "secret"), window.oldPage = true)`)
+	waitFor(t, observer, `window.stored`)
 	if err := mygo.App.ClearBrowsingData(); err != nil {
 		t.Fatal(err)
 	}
@@ -2496,8 +2642,8 @@ func TestWindowOpenAllowed(t *testing.T) {
 	if id, _ := mygo.EvalAs[int](child.Page(), "mygo.windowId"); id != child.ID() {
 		t.Errorf("child bridge reports window %d, want %d", id, child.ID())
 	}
-	// On Linux new windows are independent pages (see Window.SetWindowOpenHandler).
-	if opener, _ := mygo.EvalAs[bool](child.Page(), "window.opener !== null"); !opener && runtime.GOOS == "darwin" {
+	// On Linux new windows are independent pages (see Page.SetWindowOpenHandler).
+	if opener, _ := mygo.EvalAs[bool](child.Page(), "window.opener !== null"); !opener && (runtime.GOOS == "darwin" || runtime.GOOS == "windows") {
 		t.Error("window.opener is not set")
 	}
 }
