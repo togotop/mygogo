@@ -10,6 +10,7 @@ import (
 	"fmt"
 	"log"
 	"math"
+	"runtime"
 	"time"
 
 	"github.com/egoist/mygo"
@@ -42,10 +43,16 @@ func channel(s int) []float32 {
 	return y
 }
 
-func main() {
-	probeOn := flag.Bool("probe", false, "print the plot's spans once a second")
-	flag.Parse()
+var probeOn = flag.Bool("probe", false, "print the plot's spans once a second")
 
+func main() {
+	flag.Parse()
+	run()
+}
+
+// run is the app: main on a desktop, the Android host's entry on a phone,
+// where there is no command line and the readings print by default.
+func run() {
 	ch := &plot.Chart{Height: 320, Cursor: true, Legend: true,
 		Label: "Four waves", Note: "four series of a million samples"}
 	for s := range 4 {
@@ -57,8 +64,8 @@ func main() {
 		})
 	}
 
-	if *probeOn {
-		probe.On("plot") // the plot/update and plot/paint spans (a prefix, no slash)
+	if *probeOn || runtime.GOOS == "android" {
+		probe.On("plot") // the plot/update and plot/paint spans: a prefix, no slash
 		go func() {
 			for range time.Tick(time.Second) {
 				for _, n := range probe.Counts() {
