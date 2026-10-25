@@ -41,6 +41,16 @@ var palette = [...]ui.Color{
 // of the plot, the second along the right. Series name the axis they are
 // measured on, so a millivolt channel and a volt channel each get a scale
 // of their own.
+// Band shades a range of y across the plot, under the series: a tolerance
+// around a value, a safe operating area, a target range. Its Label, if any,
+// goes at its top left.
+type Band struct {
+	Lo, Hi float64
+	Axis   int      // the y axis the values are on; 0 when out of range
+	Color  ui.Color // zero: the theme's accent, faint
+	Label  string
+}
+
 type Axis struct {
 	// Range fixes the axis; a zero Range fits it to the series on it.
 	Range Range
@@ -61,6 +71,7 @@ var oneAxis = [1]Axis{{}}
 type Chart struct {
 	Series []*Series
 	Axes   []Axis        // zero: one left axis; at most two, left and right
+	Bands  []Band        // shaded ranges of y, under the series
 	Height float32       // zero: 200
 	Time   bool          // x is seconds since the epoch, for the axis' ticks
 	Follow time.Duration // >0: pin the newest this long, in seconds of x
@@ -88,6 +99,7 @@ type Chart struct {
 	mDrag    int     // 0: none, 1: A, 2: B
 	yFit     [2]bool // these axes were zoomed, so fitting clears them
 	mark     ui.Color
+	tint     ui.Color // the faint fill of a band
 	px      int            // the plot's pixel width, from the last paint
 	cache   []geom         // per series, keyed by the view, px and data version
 	points  [][][2]float32 // per series, the screen points, reused
@@ -189,6 +201,7 @@ func (ch *Chart) Element(c *ui.Context) ui.Element {
 	ch.border = c.Theme().Border
 	ch.band = c.Theme().Accent.Alpha(0.18)
 	ch.mark = c.Theme().TextMuted
+	ch.tint = c.Theme().Accent.Alpha(0.12)
 	ch.vx = vx
 	ch.placeMarkers()
 	if ch.drawFn == nil { // a steady frame must not allocate these
@@ -399,6 +412,7 @@ func (ch *Chart) paint(p *ui.Painter, r ui.Rect) {
 		y := chart.Y(r, t.At)
 		p.Line(r.X, y, r.X+r.W, y, 1, ch.border)
 	}
+	ch.drawBands(p, r)
 	ch.drawMarkers(p, r)
 	if !ch.vx.Valid() || ch.yHi[0] <= ch.yLo[0] {
 		return

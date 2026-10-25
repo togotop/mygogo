@@ -89,6 +89,20 @@ logarithmic: the fit rounds out to whole decades, values at or below zero sit
 at the bottom, and Alt with the wheel zooms it in decades. The grid follows
 the first axis; the second only labels its side.
 
+## Bands
+
+A `Band` shades a range of y across the plot, under the series: a tolerance
+around a value, a safe operating area, a target range. It belongs to an axis,
+so a band on the right follows that axis' scale, and its label sits at its
+top left.
+
+```go
+ch.Bands = []plot.Band{
+	{Lo: 4.75, Hi: 5.25, Label: "5 V ±5%"},
+	{Lo: 0, Hi: 900, Axis: 1, Color: ui.RGBA(40, 140, 240, 0.10)},
+}
+```
+
 ## Live data
 
 `Follow` pins the view to the newest samples: a chart of a feed shows the
@@ -219,5 +233,6 @@ mask, which is much slower than the GPU capsules that `StrokePolyline` draws.
 
 ## What it leaves out
 
-More than two y axes, bands and annotations, and exporting an image. `ui/chart` has the parts for those; `plot` keeps to
+More than two y axes, annotations other than a band's label, and exporting
+an image. `ui/chart` has the parts for those; `plot` keeps to
 the waveform.
