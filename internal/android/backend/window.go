@@ -93,6 +93,11 @@ func (w *window) SetRepresentedFile(string) {}
 // window decoration. The core marks the title instead.
 func (w *window) SetDocumentEdited(bool) {}
 
+// SetActiveAppearance does nothing: keeping a window drawn as the active,
+// key window while it is not is a macOS affordance. Android shows the
+// foreground Activity only, so there is no inactive-window chrome to keep.
+func (w *window) SetActiveAppearance(bool) {}
+
 // Show marks the window visible and asks for a frame. A phone's window is
 // the whole screen and the Activity shows it; there is no separate step.
 func (w *window) Show() {
