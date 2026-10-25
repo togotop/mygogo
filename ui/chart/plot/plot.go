@@ -66,6 +66,7 @@ type geom struct {
 	xs    []float64
 	lo    []float32
 	hi    []float32
+	py    *pyramid // the levels of this series, kept across views
 	ready bool
 }
 
@@ -181,6 +182,26 @@ func (ch *Chart) align() {
 	ch.points = ch.points[:len(ch.Series)]
 }
 
+// scanFor returns how to walk s for this view: its samples, or the buckets
+// of the pyramid level that fits a pixel column, when the view covers more
+// samples than the plot has pixels. An irregular x has no bucket grid.
+func (ch *Chart) scanFor(g *geom, s *Series, vx Range, px int) scan {
+	if s.X != nil || s.Count() == 0 {
+		return rawScan(s)
+	}
+	from := max(0, s.IndexAt(vx.Lo)-1)
+	to := min(s.Count(), s.IndexAt(vx.Hi)+1)
+	lv := levelFor(float64(to-from) / float64(max(1, px)))
+	if lv < 0 {
+		return rawScan(s)
+	}
+	if g.py == nil {
+		g.py = &pyramid{}
+	}
+	g.py.build(s, lv)
+	return bucketScan(s, g.py, lv)
+}
+
 // update decimates every series for vx at px pixels wide, and fits the y
 // range to the extremes of the visible samples.
 func (ch *Chart) update(vx Range, px int) {
@@ -193,7 +214,7 @@ func (ch *Chart) update(vx Range, px int) {
 		key := geomKey{lo: vx.Lo, hi: vx.Hi, px: px, version: s.version, owner: ch.version, n: s.Count(), x0: s.X0, dx: s.Dx}
 		if !g.ready || g.key != key {
 			g.key = key
-			g.xs, g.lo, g.hi = columns(s, vx, px, g.xs, g.lo, g.hi)
+			g.xs, g.lo, g.hi = columns(ch.scanFor(g, s, vx, px), vx, px, g.xs, g.lo, g.hi)
 			g.ready = true
 		}
 		if s.Hidden {

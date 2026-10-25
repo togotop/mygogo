@@ -39,7 +39,7 @@ func BenchmarkPlotColumns(b *testing.B) {
 			b.ReportAllocs()
 			for b.Loop() {
 				for i := range series {
-					xs[i], low[i], high[i] = columns(series[i], vx, 1280, xs[i], low[i], high[i])
+					xs[i], low[i], high[i] = columns(rawScan(series[i]), vx, 1280, xs[i], low[i], high[i])
 				}
 			}
 		})
