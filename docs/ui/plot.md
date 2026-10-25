@@ -1,5 +1,7 @@
 # Waveforms
 
+<!-- preview plot 300 -->
+
 Package `ui/chart/plot` draws series of samples — waveforms — whose cost
 follows the width of the plot rather than the number of samples: every frame
 reduces the visible samples to the lowest and highest of each pixel column,
