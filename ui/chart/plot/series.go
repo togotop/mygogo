@@ -35,6 +35,9 @@ type Series struct {
 	// Head is where the oldest sample is when Y is a ring that wraps: the
 	// i-th sample is at Y[(Head+i)%len(Y)]. Zero for a plain column.
 	Head int
+	// Axis is the index of the Chart.Axes the series is measured on: 0 is
+	// the left axis, 1 the right. Out of range means the first.
+	Axis int
 
 	Color  ui.Color // zero: the palette's, by index; keep it opaque
 	Width  float32  // zero: 1.5

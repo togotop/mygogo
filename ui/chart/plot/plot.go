@@ -37,10 +37,26 @@ var palette = [...]ui.Color{
 	ui.RGB(80, 180, 200),
 }
 
+// Axis is one of the chart's y scales: the first runs along the left side
+// of the plot, the second along the right. Series name the axis they are
+// measured on, so a millivolt channel and a volt channel each get a scale
+// of their own.
+type Axis struct {
+	// Range fixes the axis; a zero Range fits it to the series on it.
+	Range Range
+	// Format labels the ticks; nil labels them with as many decimals as
+	// their step needs.
+	Format func(float64) string
+}
+
+// oneAxis is the axis of a Chart that names none: a left one, fitted.
+var oneAxis = [1]Axis{{}}
+
 // Chart is a waveform view: its series, what it shows, and how it draws.
 // Keep it in the app's state; it holds the buffers of every frame.
 type Chart struct {
 	Series []*Series
+	Axes   []Axis        // zero: one left axis; at most two, left and right
 	Height float32       // zero: 200
 	Time   bool          // x is seconds since the epoch, for the axis' ticks
 	Follow time.Duration // >0: pin the newest this long, in seconds of x
@@ -65,10 +81,10 @@ type Chart struct {
 	px      int            // the plot's pixel width, from the last paint
 	cache   []geom         // per series, keyed by the view, px and data version
 	points  [][][2]float32 // per series, the screen points, reused
-	yTicks  []chart.Tick
+	yTicks  [2][]chart.Tick // one per axis
 	xTicks  []chart.Tick
-	yLo     float64
-	yHi     float64
+	yLo     [2]float64 // one per axis
+	yHi     [2]float64
 	ticks   tickCache
 	border  ui.Color
 	version uint64 // what Touch bumps
@@ -99,7 +115,8 @@ type geomKey struct {
 // tickCache is the ticks of each axis and the domain they were for: a hit
 // allocates nothing, which is what a steady frame needs.
 type tickCache struct {
-	left, bottom tickEntry
+	y      [2]tickEntry
+	bottom tickEntry
 }
 
 type tickEntry struct {
@@ -145,7 +162,9 @@ func (ch *Chart) Element(c *ui.Context) ui.Element {
 		px = 1024
 	}
 	ch.update(vx, px)
-	ch.yTicks = ch.ticks.left.of(ch.yLo, ch.yHi, 4, false)
+	for k := range ch.axisCount() {
+		ch.yTicks[k] = ch.ticks.y[k].of(ch.yLo[k], ch.yHi[k], 4, false)
+	}
 	ch.xTicks = ch.ticks.bottom.of(vx.Lo, vx.Hi, 6, ch.Time)
 	ch.border = c.Theme().Border
 	ch.band = c.Theme().Accent.Alpha(0.18)
@@ -170,7 +189,11 @@ func (ch *Chart) plot(c *ui.Context) ui.Element {
 	if height <= 0 {
 		height = 200
 	}
-	return chart.Plot(c, chart.Axes{Left: ch.yTicks, Bottom: ch.xTicks}, func(area ui.Element) {
+	ax := chart.Axes{Left: ch.yTicks[0], Bottom: ch.xTicks}
+	if ch.axisCount() > 1 {
+		ax.Right = ch.yTicks[1]
+	}
+	return chart.Plot(c, ax, func(area ui.Element) {
 		area.Label(ch.Label).Description(ch.Note)
 		area.Focusable().HandleInput(ch.inputFn)
 		ch.keys(area)
@@ -250,7 +273,10 @@ func (ch *Chart) scanFor(g *geom, s *Series, vx Range, px int) scan {
 func (ch *Chart) update(vx Range, px int) {
 	defer probe.Span("plot/update")()
 	ch.align()
-	lo, hi := math.Inf(1), math.Inf(-1)
+	var lo, hi [2]float64
+	for k := range lo {
+		lo[k], hi[k] = math.Inf(1), math.Inf(-1)
+	}
 	for i, s := range ch.Series {
 		s.adopt()
 		g := &ch.cache[i]
@@ -264,28 +290,63 @@ func (ch *Chart) update(vx Range, px int) {
 		if s.Hidden {
 			continue
 		}
+		a := ch.axisOf(s)
 		for j, x := range g.xs {
 			if x < vx.Lo || x > vx.Hi {
 				continue // the points beyond each edge only feed the line
 			}
-			lo = math.Min(lo, float64(g.lo[j]))
-			hi = math.Max(hi, float64(g.hi[j]))
+			lo[a] = math.Min(lo[a], float64(g.lo[j]))
+			hi[a] = math.Max(hi[a], float64(g.hi[j]))
 		}
 	}
-	switch {
-	case ch.view().Y.Valid():
-		y := ch.view().Y
-		ch.yLo, ch.yHi = y.Lo, y.Hi
-	case hi < lo: // nothing visible
-		ch.yLo, ch.yHi = 0, 1
-	default:
-		span := hi - lo
-		if span == 0 {
-			span = math.Abs(hi)*0.04 + 1e-9
-		}
-		l := chart.NewLinear(lo-0.04*span, hi+0.04*span).Nice(4)
-		ch.yLo, ch.yHi = l.Lo, l.Hi
+	for k := range ch.axisCount() {
+		ch.yLo[k], ch.yHi[k] = ch.fitAxis(k, lo[k], hi[k])
 	}
+}
+
+// axisCount returns how many y axes the chart has: the ones it names, up to
+// the left and right sides, or one fitted left axis when it names none.
+func (ch *Chart) axisCount() int {
+	if n := len(ch.Axes); n > 0 {
+		return min(n, 2)
+	}
+	return 1
+}
+
+// axisAt returns the axis at index k.
+func (ch *Chart) axisAt(k int) Axis {
+	if len(ch.Axes) == 0 {
+		return oneAxis[0]
+	}
+	return ch.Axes[k]
+}
+
+// axisOf returns the index of the axis a series is measured on.
+func (ch *Chart) axisOf(s *Series) int {
+	if a := s.Axis; a >= 0 && a < ch.axisCount() {
+		return a
+	}
+	return 0
+}
+
+// fitAxis returns the y range of axis k, from the extremes of the samples
+// visible on it: fixed when the axis says so, fitted and rounded otherwise.
+func (ch *Chart) fitAxis(k int, lo, hi float64) (float64, float64) {
+	ax := ch.axisAt(k)
+	if ax.Range.Valid() {
+		return ax.Range.Lo, ax.Range.Hi
+	}
+	if hi < lo { // nothing visible
+		return 0, 1
+	}
+	span := hi - lo
+	if span == 0 {
+		span = math.Abs(hi)*0.04 + 1e-9
+	}
+	l := chart.NewLinear(lo-0.04*span, hi+0.04*span)
+	l.Format = ax.Format
+	l = l.Nice(4)
+	return l.Lo, l.Hi
 }
 
 // paint draws the grid, then every visible series, clipped to the plot.
@@ -295,11 +356,11 @@ func (ch *Chart) paint(p *ui.Painter, r ui.Rect) {
 	if w := int(r.W * p.Scale()); w > 0 {
 		ch.px = w
 	}
-	for _, t := range ch.yTicks {
+	for _, t := range ch.yTicks[0] { // the grid follows the left axis
 		y := chart.Y(r, t.At)
 		p.Line(r.X, y, r.X+r.W, y, 1, ch.border)
 	}
-	if !ch.vx.Valid() || ch.yHi <= ch.yLo {
+	if !ch.vx.Valid() || ch.yHi[0] <= ch.yLo[0] {
 		return
 	}
 	if ch.cursorOn && ch.cursorX >= ch.vx.Lo && ch.cursorX <= ch.vx.Hi {
@@ -311,7 +372,7 @@ func (ch *Chart) paint(p *ui.Painter, r ui.Rect) {
 				continue
 			}
 			if v, ok := ch.stamp(s); ok {
-				y := chart.Y(r, ch.yf(v))
+				y := chart.Y(r, ch.yf(v, ch.axisOf(s)))
 				p.Fill(ui.Rect{X: x - 2, Y: y - 2, W: 4, H: 4}, color(i, s), 2)
 			}
 		}
@@ -327,9 +388,10 @@ func (ch *Chart) paint(p *ui.Painter, r ui.Rect) {
 	p.Clip(r, 0, ch.clipFn)
 }
 
-// yf maps a y value to a fraction up the plot, as the pointer sees it.
-func (ch *Chart) yf(v float32) float32 {
-	return float32((float64(v) - ch.yLo) / (ch.yHi - ch.yLo))
+// yf maps a y value to a fraction up the plot on its axis, as the pointer
+// sees it.
+func (ch *Chart) yf(v float32, axis int) float32 {
+	return float32((float64(v) - ch.yLo[axis]) / (ch.yHi[axis] - ch.yLo[axis]))
 }
 
 // emit draws the series' cached columns as screen points, inside the clip.
@@ -345,11 +407,12 @@ func (ch *Chart) emit() {
 			continue
 		}
 		pts := ch.points[i][:0]
+		a := ch.axisOf(s)
 		for j, x := range g.xs {
 			f := float32((x - ch.vx.Lo) / span)
-			pts = append(pts, [2]float32{chart.X(r, f), chart.Y(r, ch.yf(g.lo[j]))})
+			pts = append(pts, [2]float32{chart.X(r, f), chart.Y(r, ch.yf(g.lo[j], a))})
 			if g.hi[j] != g.lo[j] {
-				pts = append(pts, [2]float32{chart.X(r, f), chart.Y(r, ch.yf(g.hi[j]))})
+				pts = append(pts, [2]float32{chart.X(r, f), chart.Y(r, ch.yf(g.hi[j], a))})
 			}
 		}
 		ch.points[i] = pts

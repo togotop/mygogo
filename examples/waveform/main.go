@@ -35,10 +35,19 @@ func wave(i, s int) float32 {
 	return float32(v)
 }
 
+// sample returns the i-th sample of channel s: the last two channels are
+// in millivolts, on their own axis.
+func sample(i, s int) float32 {
+	if s < 2 {
+		return wave(i, s)
+	}
+	return wave(i, s) * 1000
+}
+
 func channel(s int) []float32 {
 	y := make([]float32, samples)
 	for i := range y {
-		y[i] = wave(i, s)
+		y[i] = sample(i, s)
 	}
 	return y
 }
@@ -63,7 +72,7 @@ func feed(ch *plot.Chart) {
 			for c := range ch.Series {
 				y := make([]float32, n)
 				for i := range y {
-					y[i] = wave(int(from)+i, c)
+					y[i] = sample(int(from)+i, c)
 				}
 				ch.Series[c].Swap(y, float64(from)/rate, 1.0/rate)
 			}
@@ -80,13 +89,15 @@ func main() {
 // where there is no command line and the readings print by default.
 func run() {
 	ch := &plot.Chart{Height: 320, Cursor: true, Legend: true,
-		Label: "Four waves", Note: "four series of a million samples"}
+		Axes:  []plot.Axis{{}, {}}, // the last two channels, in millivolts
+		Label: "Four waves", Note: "four channels of a million samples"}
 	for s := range 4 {
 		ch.Series = append(ch.Series, &plot.Series{
 			Name: fmt.Sprintf("channel %d", s+1),
 			Y:    channel(s),
 			X0:   0,
 			Dx:   1.0 / rate,
+			Axis: s / 2, // channels 1-2 left, 3-4 right
 		})
 	}
 	streaming := *live || runtime.GOOS == "android"

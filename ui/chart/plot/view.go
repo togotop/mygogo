@@ -1,9 +1,9 @@
 package plot
 
-// Viewport is what the chart shows: a range along x, and one along y.
-// A zero Y means auto: the chart fits it to the visible samples.
+// Viewport is the range along x that the chart shows. The y ranges belong
+// to the chart's Axes, one each.
 type Viewport struct {
-	X, Y Range
+	X Range
 }
 
 // ZoomX scales the view around the x at, f < 1 zooming in, as the wheel

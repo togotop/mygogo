@@ -58,6 +58,7 @@ s := &plot.Series{
 	Color: ui.RGB(40, 140, 240), // zero: the palette's, by index
 	Width: 1.5,            // zero: 1.5 DIPs
 	Hidden: false,
+	Axis:  0,              // measured on the chart's first axis
 }
 ```
 
@@ -66,6 +67,25 @@ belongs to the view's thread — change the slices there and call
 `Series.Touch`, which is what makes the next frame decimate again. A new
 length, `X0` or `Dx` is noticed without it; new values in the same places
 are not.
+
+## Axes
+
+One y axis, fitted to every series and drawn on the left, is the default. A
+channel of millivolts and one of volts cannot share it — the small one
+flattens — so a series names the axis it is measured on: the first runs
+along the left, the second along the right, each fitted to its own series.
+
+```go
+ch.Axes = []plot.Axis{
+	{},                         // fitted to the series on it
+	{Range: plot.Range{-5, 5}}, // fixed
+}
+ch.Series[1].Axis = 1
+```
+
+`Axis.Format` labels the ticks its way, as `Axis.Format: func(v float64) string {
+return strconv.FormatFloat(v, 'f', 1, 64) + " V" }`. The grid follows the
+first axis; the second only labels its side.
 
 ## Live data
 
@@ -174,6 +194,6 @@ mask, which is much slower than the GPU capsules that `StrokePolyline` draws.
 
 ## What it leaves out
 
-Logarithmic scales, more than one y axis per chart, bands and annotations,
-and exporting an image. `ui/chart` has the parts for those; `plot` keeps to
+Logarithmic scales, more than two y axes, bands and annotations, zooming
+y, and exporting an image. `ui/chart` has the parts for those; `plot` keeps to
 the waveform.
