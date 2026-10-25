@@ -35,20 +35,20 @@ func (ch *Chart) input(ev ui.InputEvent) bool {
 			step /= 4
 		}
 		// One notch of 100 DIPs zooms by a quarter, toward the pointer.
-		ch.View = Viewport{X: ch.vx}.ZoomX(math.Pow(1.25, step/100), x)
+		ch.setView(Viewport{X: ch.vx}.ZoomX(math.Pow(1.25, step/100), x))
 		return true
 	case ui.InputZoom:
 		if ev.Scale <= 0 {
 			return false
 		}
-		ch.View = Viewport{X: ch.vx}.ZoomX(1/float64(ev.Scale), x)
+		ch.setView(Viewport{X: ch.vx}.ZoomX(1/float64(ev.Scale), x))
 		return true
 	case ui.InputPointerDown:
 		if ev.Button != 0 {
 			return false
 		}
 		if ev.Clicks >= 2 {
-			ch.View = Viewport{} // the whole data again
+			ch.setView(Viewport{}) // the whole data again
 			return true
 		}
 		ch.drag = dragState{active: true, pan: ev.Mods&ui.Shift != 0, fromX: x, toX: x, view: ch.vx}
@@ -59,7 +59,7 @@ func (ch *Chart) input(ev ui.InputEvent) bool {
 		}
 		ch.drag.toX = x
 		if ch.drag.pan {
-			ch.View = Viewport{X: ch.drag.view}.PanX(ch.drag.fromX - x)
+			ch.setView(Viewport{X: ch.drag.view}.PanX(ch.drag.fromX - x))
 		}
 		return true
 	case ui.InputPointerUp:
@@ -73,7 +73,7 @@ func (ch *Chart) input(ev ui.InputEvent) bool {
 		}
 		lo, hi := min(d.fromX, d.toX), max(d.fromX, d.toX)
 		if hi-lo > 0.02*ch.vx.Span() { // a click is not a range
-			ch.View = Viewport{X: Range{lo, hi}}
+			ch.setView(Viewport{X: Range{lo, hi}})
 		}
 		return true
 	case ui.InputPointerCancel:
@@ -99,14 +99,14 @@ func (ch *Chart) keys(area ui.Element) {
 	mid := (ch.vx.Lo + ch.vx.Hi) / 2
 	switch {
 	case area.Shortcut(0, ui.KeyLeft):
-		ch.View = Viewport{X: ch.vx}.PanX(-step)
+		ch.setView(Viewport{X: ch.vx}.PanX(-step))
 	case area.Shortcut(0, ui.KeyRight):
-		ch.View = Viewport{X: ch.vx}.PanX(step)
+		ch.setView(Viewport{X: ch.vx}.PanX(step))
 	case area.Shortcut(0, ui.KeyEqual):
-		ch.View = Viewport{X: ch.vx}.ZoomX(0.8, mid)
+		ch.setView(Viewport{X: ch.vx}.ZoomX(0.8, mid))
 	case area.Shortcut(0, ui.KeyMinus):
-		ch.View = Viewport{X: ch.vx}.ZoomX(1.25, mid)
+		ch.setView(Viewport{X: ch.vx}.ZoomX(1.25, mid))
 	case area.Shortcut(0, ui.KeyHome), area.Shortcut(0, ui.KeyEscape):
-		ch.View = Viewport{}
+		ch.setView(Viewport{})
 	}
 }

@@ -16,11 +16,23 @@ func (ch *Chart) track(area ui.Element) {
 	}
 	x, _, over := area.PointerPosition()
 	w := area.Bounds().W
-	if !over || w <= 0 {
-		return
+	switch {
+	case over && w > 0:
+		ch.cursorX = ch.vx.Lo + float64(x/w)*ch.vx.Span()
+		ch.cursorOn = true
+		ch.owns = true
+		if ch.Sync != nil {
+			ch.Sync.Cursor, ch.Sync.HasCursor = ch.cursorX, true
+		}
+	case ch.owns: // it had the pointer, and now it does not
+		ch.owns = false
+		if ch.Sync != nil {
+			ch.Sync.HasCursor = false
+		}
 	}
-	ch.cursorX = ch.vx.Lo + float64(x/w)*ch.vx.Span()
-	ch.cursorOn = true
+	if !ch.cursorOn && ch.Sync != nil && ch.Sync.HasCursor {
+		ch.cursorX, ch.cursorOn = ch.Sync.Cursor, true
+	}
 }
 
 // stamp returns the sample of s nearest the cursor, and whether there is
@@ -33,7 +45,7 @@ func (ch *Chart) stamp(s *Series) (float32, bool) {
 	if i < 0 || i >= s.Count() {
 		return 0, false
 	}
-	v := s.Y[i]
+	v := s.YAt(i)
 	if v != v {
 		return 0, false
 	}

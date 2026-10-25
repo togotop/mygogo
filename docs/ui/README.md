@@ -242,6 +242,8 @@ UI as they read other apps (see [Accessibility](accessibility.md)).
 - [Charts](chart.md): scales, axes and marks without a look, for bars,
   lines, areas, stacks and donuts, and a selection the pointer and the
   keyboard move.
+- [Waveforms](plot.md): a chart of samples that stays cheap as the data
+  grows: zoom, pan, cursor, legend, and charts that move together.
 
 ## Images
 

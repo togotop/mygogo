@@ -75,6 +75,14 @@ func columns(sc scan, vx Range, px int, xs []float64, lo, hi []float32) ([]float
 // columnsRaw is the fast path: one sample, one y read, no item abstraction.
 // It must keep the same envelope as columnsBuckets (tested).
 func columnsRaw(s *Series, vx Range, px int, xs []float64, lo, hi []float32) ([]float64, []float32, []float32) {
+	if s.Head == 0 {
+		return columnsLinear(s, vx, px, xs, lo, hi)
+	}
+	return columnsRing(s, vx, px, xs, lo, hi)
+}
+
+// columnsLinear decimates a plain column: sample i is Y[i].
+func columnsLinear(s *Series, vx Range, px int, xs []float64, lo, hi []float32) ([]float64, []float32, []float32) {
 	xs, lo, hi = xs[:0], lo[:0], hi[:0]
 	n := s.Count()
 	if n == 0 || px <= 0 || !vx.Valid() {
@@ -113,6 +121,65 @@ func columnsRaw(s *Series, vx Range, px int, xs []float64, lo, hi []float32) ([]
 		emit(a)
 		if b != a {
 			emit(b)
+		}
+	}
+	return xs, lo, hi
+}
+
+// columnsRing decimates a ring: the sample at logical i sits at the slot p,
+// which a ring wraps at most once over the window, so p steps beside i
+// rather than taking a remainder per sample.
+func columnsRing(s *Series, vx Range, px int, xs []float64, lo, hi []float32) ([]float64, []float32, []float32) {
+	xs, lo, hi = xs[:0], lo[:0], hi[:0]
+	n := s.Count()
+	if n == 0 || px <= 0 || !vx.Valid() {
+		return xs, lo, hi
+	}
+	from := max(0, s.IndexAt(vx.Lo)-1)
+	to := min(n, s.IndexAt(vx.Hi)+1)
+	scale := float64(px) / vx.Span()
+	y, yn := s.Y, len(s.Y)
+	p := from + s.Head
+	if p >= yn {
+		p -= yn
+	}
+	col := func(i int) int { return int(math.Floor((s.XAt(i) - vx.Lo) * scale)) }
+	next := func() { if p++; p == yn {
+		p = 0
+	} }
+	for i := from; i < to; {
+		if y[p] != y[p] { // NaN breaks the line
+			i++
+			next()
+			continue
+		}
+		c := col(i)
+		lowI, highI := i, i
+		lowP, highP := p, p
+		i++
+		next()
+		for i < to && y[p] == y[p] && col(i) == c {
+			if y[p] < y[lowP] {
+				lowI, lowP = i, p
+			}
+			if y[p] > y[highP] {
+				highI, highP = i, p
+			}
+			i++
+			next()
+		}
+		a, b := lowI, highI // in sample order, as chart.MinMax emits them
+		ap, bp := lowP, highP
+		if a > b {
+			a, b, ap, bp = b, a, bp, ap
+		}
+		xs = append(xs, s.XAt(a))
+		lo = append(lo, y[ap])
+		hi = append(hi, y[ap])
+		if b != a {
+			xs = append(xs, s.XAt(b))
+			lo = append(lo, y[bp])
+			hi = append(hi, y[bp])
 		}
 	}
 	return xs, lo, hi

@@ -32,6 +32,9 @@ type Series struct {
 	X0    float64
 	Dx    float64
 	X     []float64 // irregular x, ascending; nil means X0 + i*Dx
+	// Head is where the oldest sample is when Y is a ring that wraps: the
+	// i-th sample is at Y[(Head+i)%len(Y)]. Zero for a plain column.
+	Head int
 
 	Color  ui.Color // zero: the palette's, by index; keep it opaque
 	Width  float32  // zero: 1.5
@@ -68,6 +71,17 @@ func (s *Series) adopt() {
 
 // Count returns how many samples the series has.
 func (s *Series) Count() int { return len(s.Y) }
+
+// YAt returns the i-th sample's value, in the ring's order.
+func (s *Series) YAt(i int) float32 {
+	if s.Head == 0 {
+		return s.Y[i]
+	}
+	if p := i + s.Head; p < len(s.Y) {
+		return s.Y[p]
+	}
+	return s.Y[i+s.Head-len(s.Y)]
+}
 
 // XAt returns the x of the i-th sample.
 func (s *Series) XAt(i int) float64 {

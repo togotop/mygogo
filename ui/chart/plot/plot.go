@@ -45,6 +45,7 @@ type Chart struct {
 	Time   bool          // x is seconds since the epoch, for the axis' ticks
 	Follow time.Duration // >0: pin the newest this long, in seconds of x
 	View   Viewport      // the user's zoom; a zero X fits the data
+	Sync   *Group        // share the x view and the cursor with other charts
 	Cursor bool          // a crosshair at the pointer, reading the series there
 	Legend bool          // a row above the plot naming the series and their values
 	Label  string        // what assistive technology reads as the plot's name
@@ -59,6 +60,7 @@ type Chart struct {
 	drag    dragState
 	band    ui.Color // the drag's selection band
 	cursorOn bool
+	owns     bool    // this chart is the one with the pointer over it
 	cursorX  float64 // the pointer's x, in data units
 	px      int            // the plot's pixel width, from the last paint
 	cache   []geom         // per series, keyed by the view, px and data version
@@ -185,7 +187,7 @@ func (ch *Chart) plot(c *ui.Context) ui.Element {
 // user's zoom, or the whole data, kept within half a screen of its ends.
 func (ch *Chart) xView() Range {
 	data := ch.dataExtent()
-	v := ch.View
+	v := ch.view()
 	if ch.Follow > 0 && data.Valid() {
 		v = Viewport{X: Range{data.Hi - ch.Follow.Seconds(), data.Hi}}
 	} else if !v.X.Valid() {
@@ -224,7 +226,9 @@ func (ch *Chart) align() {
 // of the pyramid level that fits a pixel column, when the view covers more
 // samples than the plot has pixels. An irregular x has no bucket grid.
 func (ch *Chart) scanFor(g *geom, s *Series, vx Range, px int) scan {
-	if s.X != nil || s.Count() == 0 {
+	// A ring rotates under every view, and an irregular x has no bucket
+	// grid: both decimate their samples directly.
+	if s.X != nil || s.Head != 0 || s.Count() == 0 {
 		return rawScan(s)
 	}
 	from := max(0, s.IndexAt(vx.Lo)-1)
@@ -267,8 +271,9 @@ func (ch *Chart) update(vx Range, px int) {
 		}
 	}
 	switch {
-	case ch.View.Y.Valid():
-		ch.yLo, ch.yHi = ch.View.Y.Lo, ch.View.Y.Hi
+	case ch.view().Y.Valid():
+		y := ch.view().Y
+		ch.yLo, ch.yHi = y.Lo, y.Hi
 	case hi < lo: // nothing visible
 		ch.yLo, ch.yHi = 0, 1
 	default:
