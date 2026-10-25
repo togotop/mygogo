@@ -27,6 +27,9 @@ func (ch *Chart) input(ev ui.InputEvent) bool {
 	x := ch.xAt(float64(ev.X))
 	switch ev.Kind {
 	case ui.InputScroll:
+		if ev.Mods&ui.Alt != 0 && !ev.Momentum {
+			return ch.zoomY(ev, float64(ev.Y))
+		}
 		if ev.Mods&(ui.Ctrl|ui.Super) == 0 || ev.Momentum {
 			return false
 		}
@@ -49,11 +52,19 @@ func (ch *Chart) input(ev ui.InputEvent) bool {
 		}
 		if ev.Clicks >= 2 {
 			ch.setView(Viewport{}) // the whole data again
+			ch.fitY()
 			return true
+		}
+		if ch.Measure && ch.grabMarker(float32(ev.X)) {
+			return true // the drag moves a marker, not the view
 		}
 		ch.drag = dragState{active: true, pan: ev.Mods&ui.Shift != 0, fromX: x, toX: x, view: ch.vx}
 		return true
 	case ui.InputPointerMove:
+		if ch.mDrag != 0 {
+			ch.moveMarker(float32(ev.X))
+			return true
+		}
 		if !ch.drag.active {
 			return false
 		}
@@ -63,6 +74,10 @@ func (ch *Chart) input(ev ui.InputEvent) bool {
 		}
 		return true
 	case ui.InputPointerUp:
+		if ch.mDrag != 0 {
+			ch.mDrag = 0
+			return true
+		}
 		if !ch.drag.active {
 			return false
 		}
@@ -78,6 +93,7 @@ func (ch *Chart) input(ev ui.InputEvent) bool {
 		return true
 	case ui.InputPointerCancel:
 		ch.drag.active = false
+		ch.mDrag = 0
 		return true
 	}
 	return false
@@ -108,5 +124,6 @@ func (ch *Chart) keys(area ui.Element) {
 		ch.setView(Viewport{X: ch.vx}.ZoomX(1.25, mid))
 	case area.Shortcut(0, ui.KeyHome), area.Shortcut(0, ui.KeyEscape):
 		ch.setView(Viewport{})
+		ch.fitY()
 	}
 }

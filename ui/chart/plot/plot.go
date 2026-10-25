@@ -44,6 +44,10 @@ var palette = [...]ui.Color{
 type Axis struct {
 	// Range fixes the axis; a zero Range fits it to the series on it.
 	Range Range
+	// Log makes the axis logarithmic, for values that span decades. The
+	// fit rounds out to whole decades, and values at or below zero sit at
+	// the bottom.
+	Log bool
 	// Format labels the ticks; nil labels them with as many decimals as
 	// their step needs.
 	Format func(float64) string
@@ -62,8 +66,9 @@ type Chart struct {
 	Follow time.Duration // >0: pin the newest this long, in seconds of x
 	View   Viewport      // the user's zoom; a zero X fits the data
 	Sync   *Group        // share the x view and the cursor with other charts
-	Cursor bool          // a crosshair at the pointer, reading the series there
-	Legend bool          // a row above the plot naming the series and their values
+	Cursor  bool         // a crosshair at the pointer, reading the series there
+	Legend  bool         // a row above the plot naming the series and their values
+	Measure bool         // two markers with the change between them
 	Label  string        // what assistive technology reads as the plot's name
 	Note   string // its description, as "15 s at 1 kHz"
 
@@ -78,6 +83,11 @@ type Chart struct {
 	cursorOn bool
 	owns     bool    // this chart is the one with the pointer over it
 	cursorX  float64 // the pointer's x, in data units
+	mA, mB   float64 // the measurement markers, in data units
+	mSet     bool    // the markers have been placed
+	mDrag    int     // 0: none, 1: A, 2: B
+	yFit     [2]bool // these axes were zoomed, so fitting clears them
+	mark     ui.Color
 	px      int            // the plot's pixel width, from the last paint
 	cache   []geom         // per series, keyed by the view, px and data version
 	points  [][][2]float32 // per series, the screen points, reused
@@ -85,6 +95,7 @@ type Chart struct {
 	xTicks  []chart.Tick
 	yLo     [2]float64 // one per axis
 	yHi     [2]float64
+	yLog    [2]bool
 	ticks   tickCache
 	border  ui.Color
 	version uint64 // what Touch bumps
@@ -123,21 +134,30 @@ type tickEntry struct {
 	lo, hi float64
 	count  int
 	timed  bool
+	log    bool
 	ticks  []chart.Tick
 	ok     bool
 }
 
-// of returns the ticks of lo..hi, from the cache when the domain is the same.
-func (e *tickEntry) of(lo, hi float64, count int, timed bool) []chart.Tick {
-	if e.ok && e.lo == lo && e.hi == hi && e.count == count && e.timed == timed {
+// of returns the ticks of lo..hi on the axis, from the cache when the
+// domain and the kind of scale are the same.
+func (e *tickEntry) of(ax Axis, lo, hi float64, count int, timed bool) []chart.Tick {
+	if e.ok && e.lo == lo && e.hi == hi && e.count == count && e.timed == timed && e.log == ax.Log {
 		return e.ticks
 	}
-	if timed {
+	switch {
+	case timed:
 		e.ticks = chart.NewTime(unix(lo), unix(hi)).Ticks(count)
-	} else {
-		e.ticks = chart.NewLinear(lo, hi).Ticks(count)
+	case ax.Log:
+		l := chart.NewLog(lo, hi)
+		l.Format = ax.Format
+		e.ticks = l.Ticks(count)
+	default:
+		l := chart.NewLinear(lo, hi)
+		l.Format = ax.Format
+		e.ticks = l.Ticks(count)
 	}
-	e.lo, e.hi, e.count, e.timed, e.ok = lo, hi, count, timed, true
+	e.lo, e.hi, e.count, e.timed, e.log, e.ok = lo, hi, count, timed, ax.Log, true
 	return e.ticks
 }
 
@@ -163,20 +183,22 @@ func (ch *Chart) Element(c *ui.Context) ui.Element {
 	}
 	ch.update(vx, px)
 	for k := range ch.axisCount() {
-		ch.yTicks[k] = ch.ticks.y[k].of(ch.yLo[k], ch.yHi[k], 4, false)
+		ch.yTicks[k] = ch.ticks.y[k].of(ch.axisAt(k), ch.yLo[k], ch.yHi[k], 4, false)
 	}
-	ch.xTicks = ch.ticks.bottom.of(vx.Lo, vx.Hi, 6, ch.Time)
+	ch.xTicks = ch.ticks.bottom.of(Axis{}, vx.Lo, vx.Hi, 6, ch.Time)
 	ch.border = c.Theme().Border
 	ch.band = c.Theme().Accent.Alpha(0.18)
+	ch.mark = c.Theme().TextMuted
 	ch.vx = vx
+	ch.placeMarkers()
 	if ch.drawFn == nil { // a steady frame must not allocate these
 		ch.drawFn = ch.paint
 		ch.clipFn = ch.emit
 		ch.inputFn = ch.input
 	}
-	if ch.Legend {
+	if ch.Legend || ch.Measure {
 		return ui.Column(c).Gap(4).Children(func() {
-			ch.legendRow(c)
+			ch.topRow(c)
 			ch.plot(c)
 		})
 	}
@@ -300,6 +322,8 @@ func (ch *Chart) update(vx Range, px int) {
 		}
 	}
 	for k := range ch.axisCount() {
+		ax := ch.axisAt(k)
+		ch.yLog[k] = ax.Log
 		ch.yLo[k], ch.yHi[k] = ch.fitAxis(k, lo[k], hi[k])
 	}
 }
@@ -337,7 +361,22 @@ func (ch *Chart) fitAxis(k int, lo, hi float64) (float64, float64) {
 		return ax.Range.Lo, ax.Range.Hi
 	}
 	if hi < lo { // nothing visible
+		if ax.Log {
+			return 1, 10
+		}
 		return 0, 1
+	}
+	if ax.Log { // whole decades, and never zero
+		if lo <= 0 {
+			lo = hi / 1000
+		}
+		if lo <= 0 {
+			lo = 1
+		}
+		if hi <= lo {
+			hi = lo * 10
+		}
+		return math.Pow(10, math.Floor(math.Log10(lo))), math.Pow(10, math.Ceil(math.Log10(hi)))
 	}
 	span := hi - lo
 	if span == 0 {
@@ -360,6 +399,7 @@ func (ch *Chart) paint(p *ui.Painter, r ui.Rect) {
 		y := chart.Y(r, t.At)
 		p.Line(r.X, y, r.X+r.W, y, 1, ch.border)
 	}
+	ch.drawMarkers(p, r)
 	if !ch.vx.Valid() || ch.yHi[0] <= ch.yLo[0] {
 		return
 	}
@@ -391,7 +431,15 @@ func (ch *Chart) paint(p *ui.Painter, r ui.Rect) {
 // yf maps a y value to a fraction up the plot on its axis, as the pointer
 // sees it.
 func (ch *Chart) yf(v float32, axis int) float32 {
-	return float32((float64(v) - ch.yLo[axis]) / (ch.yHi[axis] - ch.yLo[axis]))
+	lo, hi := ch.yLo[axis], ch.yHi[axis]
+	if ch.yLog[axis] {
+		x := float64(v)
+		if x <= 0 {
+			x = lo
+		}
+		return float32((math.Log10(x) - math.Log10(lo)) / (math.Log10(hi) - math.Log10(lo)))
+	}
+	return float32((float64(v) - lo) / (hi - lo))
 }
 
 // emit draws the series' cached columns as screen points, inside the clip.

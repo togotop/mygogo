@@ -84,8 +84,10 @@ ch.Series[1].Axis = 1
 ```
 
 `Axis.Format` labels the ticks its way, as `Axis.Format: func(v float64) string {
-return strconv.FormatFloat(v, 'f', 1, 64) + " V" }`. The grid follows the
-first axis; the second only labels its side.
+return strconv.FormatFloat(v, 'f', 1, 64) + " V" }`. `Axis.Log` makes the axis
+logarithmic: the fit rounds out to whole decades, values at or below zero sit
+at the bottom, and Alt with the wheel zooms it in decades. The grid follows
+the first axis; the second only labels its side.
 
 ## Live data
 
@@ -132,8 +134,12 @@ The plot takes its input as it comes:
 | Shift + drag | Pans |
 | Double click | Fits the data again |
 | Ctrl or Cmd + wheel | Zooms around the pointer, a quarter per notch |
+| Alt + wheel | Zooms the y axis under the pointer, the left half or the right |
 | Pinch | Zooms around the pointer |
 | ← →, + −, Home, Escape | Pans, zooms around the middle, fits again |
+
+Fitting the view (a double click, Home or Escape) also fits the y axes a
+wheel zoomed, and keeps the ones the app fixed with `Axis.Range`.
 
 Without the modifier the wheel goes on to the scroll containers around the
 chart, so a waveform in a scrolling page still scrolls. `Viewport` is what
@@ -158,6 +164,19 @@ cursor. Both are off by default; a chart of live data usually wants both:
 
 ```go
 ch.Cursor, ch.Legend = true, true
+```
+
+## Measuring between markers
+
+`Measure` puts two markers a third of the view apart. Dragging one moves it;
+everything else on the plot still zooms and pans, and a press within a few
+pixels of a marker drags it instead. The row above the plot reads the change
+in x, and each series' change between the markers, as an oscilloscope's
+cursors do.
+
+```go
+ch.Measure = true
+ch.Legend = true // each series' Δ between the markers
 ```
 
 ## Charts that move together
@@ -194,6 +213,6 @@ mask, which is much slower than the GPU capsules that `StrokePolyline` draws.
 
 ## What it leaves out
 
-Logarithmic scales, more than two y axes, bands and annotations, zooming
-y, and exporting an image. `ui/chart` has the parts for those; `plot` keeps to
+More than two y axes, bands and annotations, snapping a marker to the
+nearest sample, and exporting an image. `ui/chart` has the parts for those; `plot` keeps to
 the waveform.

@@ -38,10 +38,18 @@ func (ch *Chart) track(area ui.Element) {
 // stamp returns the sample of s nearest the cursor, and whether there is
 // one: the value the legend shows.
 func (ch *Chart) stamp(s *Series) (float32, bool) {
-	if !ch.cursorOn || s.Count() == 0 {
+	if !ch.cursorOn {
 		return 0, false
 	}
-	i := s.IndexAt(ch.cursorX)
+	return ch.valueAt(s, ch.cursorX)
+}
+
+// valueAt returns the sample of s nearest x, and whether there is one.
+func (ch *Chart) valueAt(s *Series, x float64) (float32, bool) {
+	if s.Count() == 0 {
+		return 0, false
+	}
+	i := s.IndexAt(x)
 	if i < 0 || i >= s.Count() {
 		return 0, false
 	}
@@ -68,23 +76,31 @@ func name(i int, s *Series) string {
 	return fmt.Sprintf("series %d", i+1)
 }
 
-// legendRow shows each series: a swatch of its color, its name, and under
-// the cursor the value it has there.
-func (ch *Chart) legendRow(c *ui.Context) {
+// topRow shows each series: a swatch of its color, its name, and the value
+// under the cursor or the change between the markers. With measuring on, it
+// also shows how far apart the markers are.
+func (ch *Chart) topRow(c *ui.Context) {
 	t := c.Theme()
 	ui.Row(c).Gap(14).Children(func() {
-		for i, s := range ch.Series {
-			if s.Hidden {
-				continue
+		if ch.Legend {
+			for i, s := range ch.Series {
+				if s.Hidden {
+					continue
+				}
+				label := name(i, s)
+				if d, ok := ch.delta(s); ok {
+					label += "  Δ" + num(float64(d))
+				} else if v, ok := ch.stamp(s); ok {
+					label += "  " + num(float64(v))
+				}
+				ui.Row(c).Gap(5).AlignItems(ui.Center).Children(func() {
+					ui.Box(c).Size(8, 8).Radius(2).Background(color(i, s))
+					ui.Text(c, label).NoWrap().FontSize(11).TextColor(t.TextMuted)
+				})
 			}
-			label := name(i, s)
-			if v, ok := ch.stamp(s); ok {
-				label += "  " + strconv.FormatFloat(float64(v), 'f', 3, 32)
-			}
-			ui.Row(c).Gap(5).AlignItems(ui.Center).Children(func() {
-				ui.Box(c).Size(8, 8).Radius(2).Background(color(i, s))
-				ui.Text(c, label).NoWrap().FontSize(11).TextColor(t.TextMuted)
-			})
+		}
+		if ch.Measure && ch.mSet {
+			ui.Text(c, "Δx "+num(ch.mB-ch.mA)).NoWrap().FontSize(11).TextColor(t.Accent)
 		}
 	})
 }

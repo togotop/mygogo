@@ -454,3 +454,42 @@ func TestTimeMicrosecondTicks(t *testing.T) {
 	}
 }
 
+
+func TestLogScale(t *testing.T) {
+	l := NewLog(1, 1000)
+	for _, c := range []struct {
+		v    float64
+		want float32
+	}{{1, 0}, {10, 1.0 / 3}, {100, 2.0 / 3}, {1000, 1}, {0, 0}, {-5, 0}} {
+		if got := l.At(c.v); math.Abs(float64(got-c.want)) > 1e-6 {
+			t.Fatalf("At(%g) = %g, want %g", c.v, got, c.want)
+		}
+	}
+	if v := l.Invert(1.0 / 3); math.Abs(v-10) > 1e-6 {
+		t.Fatalf("Invert(1/3) = %g", v)
+	}
+}
+
+func TestLogTicks(t *testing.T) {
+	for _, c := range []struct {
+		lo, hi float64
+		count  int
+		want   []string
+	}{
+		{1, 1000, 4, []string{"1", "10", "100", "1000"}},
+		{1, 10, 3, []string{"1", "2", "5", "10"}},
+		{0.01, 1, 2, []string{"0.01", "0.1", "1"}},
+	} {
+		var got []string
+		for _, tick := range NewLog(c.lo, c.hi).Ticks(c.count) {
+			got = append(got, tick.Label)
+		}
+		if !slices.Equal(got, c.want) {
+			t.Errorf("ticks of %g..%g: %v, want %v", c.lo, c.hi, got, c.want)
+		}
+	}
+	if ticks := NewLog(0, 10).Ticks(4); ticks != nil {
+		t.Errorf("a log scale from 0 made ticks: %+v", ticks)
+	}
+}
+
