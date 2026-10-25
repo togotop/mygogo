@@ -43,7 +43,33 @@ func channel(s int) []float32 {
 	return y
 }
 
-var probeOn = flag.Bool("probe", false, "print the plot's spans once a second")
+var (
+	probeOn = flag.Bool("probe", false, "print the plot's spans once a second")
+	live    = flag.Bool("live", false, "stream a second of samples at a time instead of a static minute")
+)
+
+// feed publishes a new second of samples for every channel, 30 times a
+// second, as a device thread does: a fresh column each time, which the view
+// adopts on its next frame (Series.Swap is safe from any goroutine). A
+// device that knows the view is done with a column can reuse a pair of
+// buffers instead; this demo keeps the contract simple.
+func feed(ch *plot.Chart) {
+	const rate = 20_000
+	start := time.Now()
+	for now := range time.Tick(33 * time.Millisecond) {
+		due := int64(now.Sub(start).Seconds() * rate)
+		from := max(int64(0), due-rate) // the last second
+		if n := int(due - from); n > 0 {
+			for c := range ch.Series {
+				y := make([]float32, n)
+				for i := range y {
+					y[i] = wave(int(from)+i, c)
+				}
+				ch.Series[c].Swap(y, float64(from)/rate, 1.0/rate)
+			}
+		}
+	}
+}
 
 func main() {
 	flag.Parse()
@@ -63,6 +89,17 @@ func run() {
 			Dx:   1.0 / rate,
 		})
 	}
+	streaming := *live || runtime.GOOS == "android"
+	if streaming {
+		// A window of a second, pinned to the newest samples, fed from
+		// another goroutine.
+		ch.Follow = time.Second
+		ch.Note = "four channels at 20 kHz, the last second"
+		for _, s := range ch.Series {
+			s.Y = nil
+		}
+		go feed(ch)
+	}
 
 	if *probeOn || runtime.GOOS == "android" {
 		probe.On("plot") // the plot/update and plot/paint spans: a prefix, no slash
@@ -80,7 +117,12 @@ func run() {
 	mygo.App.WhenReady(func() {
 		mygo.NewWindow(mygo.WindowOptions{Title: "Waveform", Width: 1200, Height: 700,
 			Content: ui.View(func(c *ui.Context) {
-				ui.Box(c).Fill().Padding(8).Children(func() { ch.Element(c) })
+				if streaming {
+					c.AnimationFrame() // new samples arrive between frames
+				}
+				// Keep clear of the status bar and the navigation bar.
+				a := c.SafeArea()
+				ui.Box(c).Fill().Padding(a.Top+8, 8, a.Bottom+8, 8).Children(func() { ch.Element(c) })
 			})})
 	})
 	if err := mygo.App.Run(); err != nil {

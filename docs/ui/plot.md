@@ -88,6 +88,16 @@ func (a *acq) pump() {
 }
 ```
 
+A new column does not by itself wake the view: the view asks for frames
+while data is arriving, as any live view does.
+
+```go
+Content: ui.View(func(c *ui.Context) {
+	c.AnimationFrame()
+	ch.Element(c)
+})
+```
+
 A fixed buffer that wraps is a ring: `Head` says where the oldest sample is,
 and the i-th sample is `Y[(Head+i)%len(Y)]`. `YAt(i)` reads it in that order
 for the app, and the plot decimates it without a copy.
