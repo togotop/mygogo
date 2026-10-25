@@ -93,6 +93,7 @@ type geomKey struct {
 	owner   uint64 // the Chart's Touch
 	n       int
 	x0, dx  float64
+	head    int // a ring rotates in place: the same x is another sample then
 }
 
 // tickCache is the ticks of each axis and the domain they were for: a hit
@@ -253,7 +254,8 @@ func (ch *Chart) update(vx Range, px int) {
 	for i, s := range ch.Series {
 		s.adopt()
 		g := &ch.cache[i]
-		key := geomKey{lo: vx.Lo, hi: vx.Hi, px: px, version: s.version, owner: ch.version, n: s.Count(), x0: s.X0, dx: s.Dx}
+		key := geomKey{lo: vx.Lo, hi: vx.Hi, px: px, version: s.version, owner: ch.version,
+			n: s.Count(), x0: s.X0, dx: s.Dx, head: s.Head}
 		if !g.ready || g.key != key {
 			g.key = key
 			g.xs, g.lo, g.hi = columns(ch.scanFor(g, s, vx, px), vx, px, g.xs, g.lo, g.hi)
