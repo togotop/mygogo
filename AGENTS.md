@@ -218,6 +218,7 @@ bash scripts/android-doctor.sh          # toolchain self-check: SDK≥31 / NDK r
 bash scripts/android-build.sh           # Go .so (c-shared) → 16KB align check → Gradle if android/ exists
 bash scripts/android-build.sh --so-only # the .so and its page-align check only
 bash scripts/android-run.sh             # adb install + am start + logcat
+bash scripts/android-smoke.sh           # per-device ABI: build the example's .so → install → start → screenshot + logs in .mygo/android-smoke
 bash scripts/android-egl-stress.sh      # 20x foreground/background + 10x rotation, blank-frame report
 ```
 
