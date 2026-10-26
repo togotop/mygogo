@@ -250,7 +250,22 @@ directly — the pyramid is for a column that stays put.
 Keep the palette opaque: a translucent line falls back to `StrokePath`'s CPU
 mask, which is much slower than the GPU capsules that `StrokePolyline` draws.
 
+## A picture of it
+
+`Chart.PNG` renders the chart on its own—what it shows now, at a size you
+name—and hands back PNG bytes to save, paste or print. The image has the
+theme's background, the legend row if the chart has one, and as much of the
+plot as `Height` leaves room for.
+
+```go
+b, err := ch.PNG(1200, 600)
+if err != nil {
+	return err
+}
+os.WriteFile("waveform.png", b, 0o644)
+```
+
 ## What it leaves out
 
-More than two y axes, and exporting an image. `ui/chart` has the parts for those; `plot` keeps to
-the waveform.
+More than two y axes. `ui/chart` has the parts for those; `plot` keeps to the
+waveform.
