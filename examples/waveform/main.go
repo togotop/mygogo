@@ -10,6 +10,8 @@ import (
 	"fmt"
 	"log"
 	"math"
+	"os"
+	"path/filepath"
 	"runtime"
 	"time"
 
@@ -55,7 +57,14 @@ func channel(s int) []float32 {
 var (
 	probeOn = flag.Bool("probe", false, "print the plot's spans once a second")
 	live    = flag.Bool("live", false, "stream a second of samples at a time instead of a static minute")
+
+	measure bool   // the two markers
+	showBand bool  // the tolerance band
+	saved   string // what the last export did
 )
+
+// band is the tolerance the demo shades: the input's expected range.
+var band = []plot.Band{{Lo: 0.3, Hi: 0.7, Label: "expected"}}
 
 // feed publishes a new second of samples for every channel, 30 times a
 // second, as a device thread does: a fresh column each time, which the view
@@ -85,6 +94,44 @@ func main() {
 	run()
 }
 
+// toolbar holds the switches the demo shows off, and the export.
+func toolbar(c *ui.Context, ch *plot.Chart) {
+	t := c.Theme()
+	ui.Row(c).Gap(12).AlignItems(ui.Center).Children(func() {
+		ui.Checkbox(c, &measure, "Measure").FontSize(12)
+		ui.Checkbox(c, &showBand, "Bands").FontSize(12)
+		if ui.Button(c, "Save PNG").Clicked() {
+			saved = export(ch)
+		}
+	})
+	if saved != "" {
+		ui.Text(c, saved).FontSize(11).TextColor(t.TextMuted)
+	}
+}
+
+// save writes the chart into dir as a PNG, and says what it did.
+func save(ch *plot.Chart, dir string) string {
+	b, err := ch.PNG(1600, 900)
+	if err != nil {
+		return "export failed: " + err.Error()
+	}
+	p := filepath.Join(dir, "waveform.png")
+	if err := os.WriteFile(p, b, 0o644); err != nil {
+		return "export failed: " + err.Error()
+	}
+	log.Printf("waveform: saved %s (%d KB)", p, len(b)/1024)
+	return fmt.Sprintf("saved %s (%d KB)", p, len(b)/1024)
+}
+
+// export saves the chart where the app keeps its data.
+func export(ch *plot.Chart) string {
+	dir, err := mygo.App.Path(mygo.PathUserData)
+	if err != nil {
+		return "export failed: " + err.Error()
+	}
+	return save(ch, dir)
+}
+
 // run is the app: main on a desktop, the Android host's entry on a phone,
 // where there is no command line and the readings print by default.
 func run() {
@@ -99,6 +146,12 @@ func run() {
 			Dx:   1.0 / rate,
 			Axis: s / 2, // channels 1-2 left, 3-4 right
 		})
+	}
+	if !*live { // notes of the static minute's spikes; a live window moves past them
+		ch.Notes = []plot.Note{
+			{X: 4.9996, Y: 1.32, Text: "spike"},
+			{X: 0, Y: 0.5, Text: "start"},
+		}
 	}
 	streaming := *live || runtime.GOOS == "android"
 	if streaming {
@@ -131,9 +184,18 @@ func run() {
 				if streaming {
 					c.AnimationFrame() // new samples arrive between frames
 				}
+				ch.Measure = measure
+				if showBand {
+					ch.Bands = band
+				} else {
+					ch.Bands = nil
+				}
 				// Keep clear of the status bar and the navigation bar.
 				a := c.SafeArea()
-				ui.Box(c).Fill().Padding(a.Top+8, 8, a.Bottom+8, 8).Children(func() { ch.Element(c) })
+				ui.Column(c).Fill().Padding(a.Top+8, 8, a.Bottom+8, 8).Gap(8).Children(func() {
+					toolbar(c, ch)
+					ch.Element(c)
+				})
 			})})
 	})
 	if err := mygo.App.Run(); err != nil {
