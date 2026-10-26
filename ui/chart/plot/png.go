@@ -14,8 +14,9 @@ import (
 // or print. Call it on the main thread; what the chart shows is what it
 // exports, so set the view first.
 //
-// The image has the theme's background, the legend row if the chart has one,
-// and as much of the plot as Height leaves room for.
+// The image has the theme's background and the chart filling it: the legend
+// row, if any, then the plot over the rest of the height, whatever Height
+// says. Height is put back before PNG returns.
 func (ch *Chart) PNG(width, height int) ([]byte, error) {
 	if width <= 0 || height <= 0 {
 		return nil, fmt.Errorf("plot: an image of %dx%d pixels", width, height)
@@ -23,8 +24,11 @@ func (ch *Chart) PNG(width, height int) ([]byte, error) {
 	tt := ui.NewTester(func(c *ui.Context) {
 		ui.Box(c).Fill().Background(c.Theme().Background).Children(func() { ch.Element(c) })
 	}, width, height)
-	tt.Frame() // the plot measures its width
-	tt.Frame() // and decimates at it
+	tt.Frame() // the plot measures its width, and where the legend row ends
+	height0 := ch.Height
+	defer func() { ch.Height = height0 }()
+	ch.Height = float32(height) - ch.r.Y // the plot fills what the legend leaves
+	tt.Frame()                           // and decimates at the width
 	img := tt.Image()
 	if img == nil {
 		return nil, errors.New("plot: the renderer made no image")

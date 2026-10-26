@@ -254,8 +254,9 @@ mask, which is much slower than the GPU capsules that `StrokePolyline` draws.
 
 `Chart.PNG` renders the chart on its own—what it shows now, at a size you
 name—and hands back PNG bytes to save, paste or print. The image has the
-theme's background, the legend row if the chart has one, and as much of the
-plot as `Height` leaves room for.
+theme's background and the chart filling it: the legend row, if any, then the
+plot over the rest of the height, whatever `Height` says on screen. `Height`
+is put back before `PNG` returns.
 
 ```go
 b, err := ch.PNG(1200, 600)

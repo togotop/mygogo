@@ -82,6 +82,9 @@ func name(i int, s *Series) string {
 func (ch *Chart) topRow(c *ui.Context) {
 	t := c.Theme()
 	ui.Row(c).Gap(14).Children(func() {
+		if ch.Measure && ch.mSet { // first: a wide legend must not push it out
+			ui.Text(c, "Δx "+num(ch.mB-ch.mA)).NoWrap().FontSize(11).TextColor(t.Accent)
+		}
 		if ch.Legend {
 			for i, s := range ch.Series {
 				if s.Hidden {
@@ -98,9 +101,6 @@ func (ch *Chart) topRow(c *ui.Context) {
 					ui.Text(c, label).NoWrap().FontSize(11).TextColor(t.TextMuted)
 				})
 			}
-		}
-		if ch.Measure && ch.mSet {
-			ui.Text(c, "Δx "+num(ch.mB-ch.mA)).NoWrap().FontSize(11).TextColor(t.Accent)
 		}
 	})
 }

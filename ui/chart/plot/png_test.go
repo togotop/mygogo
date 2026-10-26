@@ -36,6 +36,18 @@ func TestPNG(t *testing.T) {
 	if drawn < 200 {
 		t.Fatalf("only %d pixels differ from the corner: the chart is not in the image", drawn)
 	}
+	// The plot fills the picture: its axis labels reach the bottom half.
+	lower := 0
+	for y2 := 200; y2 < 300; y2++ {
+		for x := 0; x < 400; x++ {
+			if img.At(x, y2) != bg {
+				lower++
+			}
+		}
+	}
+	if lower < 100 {
+		t.Fatalf("only %d pixels in the lower third: the plot does not fill the image", lower)
+	}
 }
 
 func TestPNGRejectsAnEmptyImage(t *testing.T) {

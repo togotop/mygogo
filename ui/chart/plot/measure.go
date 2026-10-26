@@ -12,14 +12,32 @@ import (
 func num(v float64) string { return strconv.FormatFloat(v, 'f', 3, 64) }
 
 // placeMarkers puts A and B a third of the view apart the first time the
-// chart measures.
+// chart measures, and keeps them where they are on screen while the view
+// follows new samples: a marker measures the trace in front of it.
 func (ch *Chart) placeMarkers() {
-	if !ch.Measure || ch.mSet || !ch.vx.Valid() {
+	if !ch.Measure || !ch.vx.Valid() {
 		return
 	}
-	ch.mA = ch.snap(ch.vx.Lo + ch.vx.Span()/3)
-	ch.mB = ch.snap(ch.vx.Lo + 2*ch.vx.Span()/3)
-	ch.mSet = true
+	switch {
+	case !ch.mSet:
+		ch.mA = ch.snap(ch.vx.Lo + ch.vx.Span()/3)
+		ch.mB = ch.snap(ch.vx.Lo + 2*ch.vx.Span()/3)
+		ch.mSet = true
+		ch.keepMarkers()
+	case ch.Follow > 0:
+		ch.mA = ch.vx.Lo + float64(ch.mFA)*ch.vx.Span()
+		ch.mB = ch.vx.Lo + float64(ch.mFB)*ch.vx.Span()
+	}
+}
+
+// keepMarkers records where the markers are along the view, which is where
+// they stay when it follows new samples.
+func (ch *Chart) keepMarkers() {
+	if !ch.vx.Valid() || ch.vx.Span() <= 0 {
+		return
+	}
+	ch.mFA = float32((ch.mA - ch.vx.Lo) / ch.vx.Span())
+	ch.mFB = float32((ch.mB - ch.vx.Lo) / ch.vx.Span())
 }
 
 // markerLocal returns where a marker is, in the plot's own x.
@@ -59,6 +77,7 @@ func (ch *Chart) moveMarker(local float32) {
 	case 2:
 		ch.mB = x
 	}
+	ch.keepMarkers()
 }
 
 // snap moves x to the nearest sample of the first visible series that has

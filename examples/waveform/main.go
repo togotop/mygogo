@@ -135,6 +135,7 @@ func export(ch *plot.Chart) string {
 // run is the app: main on a desktop, the Android host's entry on a phone,
 // where there is no command line and the readings print by default.
 func run() {
+	mygo.App.SetName("waveform") // names its data directory, not the process's
 	ch := &plot.Chart{Height: 320, Cursor: true, Legend: true,
 		Axes:  []plot.Axis{{Title: "V"}, {Title: "mV"}}, // the last two channels are in millivolts
 		Label: "Four waves", Note: "four channels of a million samples"}

@@ -4,6 +4,9 @@ import (
 	"math"
 	"strings"
 	"testing"
+	"time"
+
+	"github.com/egoist/mygo/ui"
 )
 
 // A marker snaps to the sample it is nearest, so a period is a whole
@@ -32,3 +35,21 @@ func TestMeasureDescribesItself(t *testing.T) {
 		t.Fatalf("the description says %q", d)
 	}
 }
+
+// A view that follows new samples must not leave the markers behind: they
+// measure the trace in front of them, so they keep their place on screen.
+func TestMarkersKeepTheirPlaceInAFollowingView(t *testing.T) {
+	s := &Series{Y: make([]float32, 100), X0: 0, Dx: .01}
+	ch := &Chart{Height: 200, Measure: true, Follow: 500 * time.Millisecond, Series: []*Series{s}}
+	tt := ui.NewTester(func(c *ui.Context) {
+		ui.Box(c).Fill().Children(func() { ch.Element(c) })
+	}, 500, 300)
+	tt.Frame()
+	before := (ch.mA - ch.vx.Lo) / ch.vx.Span()
+	s.Swap(make([]float32, 100), 0.5, .01) // a second of new samples
+	tt.Frame()
+	if after := (ch.mA - ch.vx.Lo) / ch.vx.Span(); math.Abs(after-before) > 1e-3 {
+		t.Fatalf("the marker moved from %g to %g of the view", before, after)
+	}
+}
+

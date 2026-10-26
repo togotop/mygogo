@@ -98,6 +98,7 @@ type Chart struct {
 	owns     bool    // this chart is the one with the pointer over it
 	cursorX  float64 // the pointer's x, in data units
 	mA, mB   float64 // the measurement markers, in data units
+	mFA, mFB float32 // where they are along the view, for a view that follows
 	mSet     bool    // the markers have been placed
 	mDrag    int     // 0: none, 1: A, 2: B
 	yFit     [2]bool // these axes were zoomed, so fitting clears them
