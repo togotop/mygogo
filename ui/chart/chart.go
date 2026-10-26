@@ -39,6 +39,12 @@ const (
 	Bottom
 )
 
+// Section is one more y axis of a plot: its ticks and the title above them.
+type Section struct {
+	Title string
+	Ticks []Tick
+}
+
 // Axes are the ticks along the sides of a plot, whose labels go beside it:
 // a scale's Ticks, or ticks of your own.
 type Axes struct {
@@ -46,6 +52,10 @@ type Axes struct {
 	// LeftTitle and RightTitle name the y axes, in a row above the ticks:
 	// a unit, "mV", or what the axis measures.
 	LeftTitle, RightTitle string
+	// Extra are more y axes, each in a column of its own to the right of
+	// Right: a plot of series whose scales cannot share one or two. Each
+	// takes the width its labels need from the plot.
+	Extra []Section
 	// Label builds the label of a tick on a side, centered on the tick;
 	// nil shows its Label as text. Labels sit in boxes of no width or
 	// height, so keep their text on one line with NoWrap.
@@ -82,11 +92,21 @@ func Plot(c *ui.Context, axes Axes, build func(area ui.Element)) ui.Element {
 	if len(axes.Right) > 0 {
 		cols = append(cols, ui.FitContent())
 	}
+	for range axes.Extra {
+		cols = append(cols, ui.FitContent())
+	}
+	extraCol := col + 1 // the first extra column, after the right axis' column
+	if len(axes.Right) > 0 {
+		extraCol++
+	}
 	if len(axes.Top) > 0 {
 		rows = append([]ui.Track{ui.FitContent()}, rows...)
 		row = 2
 	}
 	titled := axes.LeftTitle != "" || axes.RightTitle != ""
+	for _, sec := range axes.Extra {
+		titled = titled || sec.Title != ""
+	}
 	topRow := 1
 	if titled {
 		// The titles take a row of their own, above the ticks and the top
@@ -109,6 +129,9 @@ func Plot(c *ui.Context, axes Axes, build func(area ui.Element)) ui.Element {
 		if len(axes.Right) > 0 {
 			axis(c, Right, axes.Right, label).ColumnStart(col + 1).RowStart(row)
 		}
+		for i, sec := range axes.Extra {
+			axis(c, Right, sec.Ticks, label).ColumnStart(extraCol + i).RowStart(row)
+		}
 		if titled {
 			if axes.LeftTitle != "" && len(axes.Left) > 0 {
 				ui.Row(c).Justify(ui.End).ColumnStart(1).RowStart(1).Children(func() {
@@ -118,6 +141,14 @@ func Plot(c *ui.Context, axes Axes, build func(area ui.Element)) ui.Element {
 			if axes.RightTitle != "" && len(axes.Right) > 0 {
 				ui.Row(c).ColumnStart(col + 1).RowStart(1).Children(func() {
 					ui.Text(c, axes.RightTitle).NoWrap()
+				})
+			}
+			for i, sec := range axes.Extra {
+				if sec.Title == "" {
+					continue
+				}
+				ui.Row(c).ColumnStart(extraCol + i).RowStart(1).Children(func() {
+					ui.Text(c, sec.Title).NoWrap()
 				})
 			}
 		}

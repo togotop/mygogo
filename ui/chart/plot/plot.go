@@ -38,9 +38,10 @@ var palette = [...]ui.Color{
 }
 
 // Axis is one of the chart's y scales: the first runs along the left side
-// of the plot, the second along the right. Series name the axis they are
-// measured on, so a millivolt channel and a volt channel each get a scale
-// of their own.
+// of the plot, the second along the right, and each one after that in a
+// column of its own to the right. Series name the axis they are measured
+// on, so a millivolt channel and a volt channel each get a scale of their
+// own.
 // Band shades a range of y across the plot, under the series: a tolerance
 // around a value, a safe operating area, a target range. Its Label, if any,
 // goes at its top left.
@@ -101,17 +102,18 @@ type Chart struct {
 	mFA, mFB float32 // where they are along the view, for a view that follows
 	mSet     bool    // the markers have been placed
 	mDrag    int     // 0: none, 1: A, 2: B
-	yFit     [2]bool // these axes were zoomed, so fitting clears them
+	yFit     []bool // these axes were zoomed, so fitting clears them
+	sections []chart.Section // the axes past the right one, reused
 	mark     ui.Color
 	tint     ui.Color // the faint fill of a band
 	px      int            // the plot's pixel width, from the last paint
 	cache   []geom         // per series, keyed by the view, px and data version
 	points  [][][2]float32 // per series, the screen points, reused
-	yTicks  [2][]chart.Tick // one per axis
+	yTicks  [][]chart.Tick // one per axis
 	xTicks  []chart.Tick
-	yLo     [2]float64 // one per axis
-	yHi     [2]float64
-	yLog    [2]bool
+	yLo     []float64 // one per axis
+	yHi     []float64
+	yLog    []bool
 	ticks   tickCache
 	border  ui.Color
 	version uint64 // what Touch bumps
@@ -142,7 +144,7 @@ type geomKey struct {
 // tickCache is the ticks of each axis and the domain they were for: a hit
 // allocates nothing, which is what a steady frame needs.
 type tickCache struct {
-	y      [2]tickEntry
+	y      []tickEntry
 	bottom tickEntry
 }
 
@@ -229,9 +231,20 @@ func (ch *Chart) plot(c *ui.Context) ui.Element {
 		height = 200
 	}
 	ax := chart.Axes{Left: ch.yTicks[0], Bottom: ch.xTicks, LeftTitle: ch.axisAt(0).Title}
-	if ch.axisCount() > 1 {
+	if n := ch.axisCount(); n > 1 {
 		ax.Right = ch.yTicks[1]
 		ax.RightTitle = ch.axisAt(1).Title
+		if n > 2 { // each one after the right axis gets a column of its own
+			if cap(ch.sections) < n-2 {
+				ch.sections = make([]chart.Section, n-2)
+			} else {
+				ch.sections = ch.sections[:n-2]
+			}
+			for k := 2; k < n; k++ {
+				ch.sections[k-2] = chart.Section{Title: ch.axisAt(k).Title, Ticks: ch.yTicks[k]}
+			}
+			ax.Extra = ch.sections
+		}
 	}
 	return chart.Plot(c, ax, func(area ui.Element) {
 		area.Label(ch.Label).Description(ch.Note)
@@ -277,7 +290,8 @@ func (ch *Chart) dataExtent() Range {
 	return Range{lo, hi}
 }
 
-// align makes the cache and the point buffers one per series.
+// align makes the cache and the point buffers one per series, and the y
+// ranges, ticks and flags one per axis.
 func (ch *Chart) align() {
 	for len(ch.cache) < len(ch.Series) {
 		ch.cache = append(ch.cache, geom{})
@@ -285,6 +299,19 @@ func (ch *Chart) align() {
 	}
 	ch.cache = ch.cache[:len(ch.Series)]
 	ch.points = ch.points[:len(ch.Series)]
+
+	n := ch.axisCount()
+	for len(ch.yLo) < n {
+		ch.yLo = append(ch.yLo, 0)
+		ch.yHi = append(ch.yHi, 0)
+		ch.yLog = append(ch.yLog, false)
+		ch.yFit = append(ch.yFit, false)
+		ch.yTicks = append(ch.yTicks, nil)
+		ch.ticks.y = append(ch.ticks.y, tickEntry{})
+	}
+	ch.yLo, ch.yHi = ch.yLo[:n], ch.yHi[:n]
+	ch.yLog, ch.yFit = ch.yLog[:n], ch.yFit[:n]
+	ch.yTicks, ch.ticks.y = ch.yTicks[:n], ch.ticks.y[:n]
 }
 
 // scanFor returns how to walk s for this view: its samples, or the buckets
@@ -314,9 +341,10 @@ func (ch *Chart) scanFor(g *geom, s *Series, vx Range, px int) scan {
 func (ch *Chart) update(vx Range, px int) {
 	defer probe.Span("plot/update")()
 	ch.align()
-	var lo, hi [2]float64
-	for k := range lo {
-		lo[k], hi[k] = math.Inf(1), math.Inf(-1)
+	// The y ranges are the accumulators of this frame, then the fit is
+	// written back over them: no buffers of its own to allocate.
+	for k := range ch.yLo {
+		ch.yLo[k], ch.yHi[k] = math.Inf(1), math.Inf(-1)
 	}
 	for i, s := range ch.Series {
 		s.adopt()
@@ -336,22 +364,24 @@ func (ch *Chart) update(vx Range, px int) {
 			if x < vx.Lo || x > vx.Hi {
 				continue // the points beyond each edge only feed the line
 			}
-			lo[a] = math.Min(lo[a], float64(g.lo[j]))
-			hi[a] = math.Max(hi[a], float64(g.hi[j]))
+			ch.yLo[a] = math.Min(ch.yLo[a], float64(g.lo[j]))
+			ch.yHi[a] = math.Max(ch.yHi[a], float64(g.hi[j]))
 		}
 	}
-	for k := range ch.axisCount() {
+	for k := range ch.yLo {
 		ax := ch.axisAt(k)
 		ch.yLog[k] = ax.Log
-		ch.yLo[k], ch.yHi[k] = ch.fitAxis(k, lo[k], hi[k])
+		ch.yLo[k], ch.yHi[k] = ch.fitAxis(k, ch.yLo[k], ch.yHi[k])
 	}
 }
 
-// axisCount returns how many y axes the chart has: the ones it names, up to
-// the left and right sides, or one fitted left axis when it names none.
+// axisCount returns how many y axes the chart has: the ones it names, or one
+// fitted left axis when it names none. The first runs along the left, the
+// second along the right, and each one after that in a column of its own to
+// the right.
 func (ch *Chart) axisCount() int {
 	if n := len(ch.Axes); n > 0 {
-		return min(n, 2)
+		return n
 	}
 	return 1
 }

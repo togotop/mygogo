@@ -85,7 +85,18 @@ ch.Axes = []plot.Axis{
 ch.Series[1].Axis = 1
 ```
 
-`Axis.Title` names the axis above its ticks, as `Title: "mV"`, which is how two
+A third axis, and each one after it, takes a column of its own to the right:
+four channels at four scales get four rulers, at the cost of the width they
+need.
+
+```go
+ch.Axes = []plot.Axis{{Title: "V"}, {Title: "mV"}, {Title: "°C"}}
+ch.Series[2].Axis = 2
+```
+
+Alt and the wheel zoom the first two axes; fix the others with `Axis.Range`.
+
+`Axis.Title` names the axis above its ticks, as `Title: "mV"`, which is how
 axes tell themselves apart. `Axis.Format` labels the ticks its way, as
 `Axis.Format: func(v float64) string {
 return strconv.FormatFloat(v, 'f', 1, 64) + " V" }`. `Axis.Log` makes the axis
@@ -268,5 +279,5 @@ os.WriteFile("waveform.png", b, 0o644)
 
 ## What it leaves out
 
-More than two y axes. `ui/chart` has the parts for those; `plot` keeps to the
-waveform.
+Zooming the third y axis and beyond with the wheel—fix their `Range`
+instead—and snapping a note to its nearest sample.
