@@ -199,6 +199,21 @@ ch.Measure = true
 ch.Legend = true // each series' Δ between the markers
 ```
 
+## Notes
+
+A `Note` labels a point of the data—the spike, the moment a sensor was
+replaced—with a dot and its text, which pans and zooms with the series.
+
+```go
+ch.Notes = []plot.Note{
+	{X: 1.2, Y: 1.35, Text: "spike"},
+	{X: 0.8, Y: 850, Axis: 1, Text: "range change"},
+}
+```
+
+A note outside the view is not drawn. Its text runs to the right of the dot,
+so keep notes a little clear of the right edge.
+
 ## Charts that move together
 
 Charts that name the same `Group` share one x view and one cursor: a drag in
@@ -237,6 +252,5 @@ mask, which is much slower than the GPU capsules that `StrokePolyline` draws.
 
 ## What it leaves out
 
-More than two y axes, annotations other than a band's label, and exporting
-an image. `ui/chart` has the parts for those; `plot` keeps to
+More than two y axes, and exporting an image. `ui/chart` has the parts for those; `plot` keeps to
 the waveform.

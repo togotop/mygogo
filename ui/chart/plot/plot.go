@@ -74,6 +74,7 @@ type Chart struct {
 	Series []*Series
 	Axes   []Axis        // zero: one left axis; at most two, left and right
 	Bands  []Band        // shaded ranges of y, under the series
+	Notes  []Note        // labels at points of the data, above the series
 	Height float32       // zero: 200
 	Time   bool          // x is seconds since the epoch, for the axis' ticks
 	Follow time.Duration // >0: pin the newest this long, in seconds of x
@@ -242,6 +243,7 @@ func (ch *Chart) plot(c *ui.Context) ui.Element {
 			area.Value(desc)
 		}
 		area.Draw(ch.drawFn)
+		ch.notes(c)
 	}).Height(height).Gap(6)
 }
 
