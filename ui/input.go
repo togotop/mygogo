@@ -27,6 +27,8 @@ func (rt *engine) event(ev platform.SurfaceEvent) (taken bool) {
 		// Input, which the next frame builds even out of sight.
 		rt.input = true
 	}
+	// The window's DIPs, zoomed, are the content's.
+	rt.fromWindow(&ev)
 	x, y := float32(ev.X), float32(ev.Y)
 	if ev.Kind == platform.PointerDown || ev.Kind == platform.WebViewPress {
 		// A press is of no element until countPress finds it one.
@@ -554,8 +556,17 @@ func (rt *engine) pointerUp(button, clicks int) {
 func (rt *engine) scroll(dx, dy float32, mods Modifiers, precise, momentum bool) {
 	chain := rt.appendHitChain(rt.chain[:0], rt.pointerX, rt.pointerY)
 	rt.chain = chain[:0]
-	if h := rt.handler(chain); h != nil && rt.deliver(h, InputEvent{Kind: InputScroll, DX: dx, DY: dy, Mods: mods, Precise: precise, Momentum: momentum}) {
-		return
+	// From the innermost element out, the first handling its input to
+	// take it: one whose handler leaves it passes it on, as it would
+	// without the handler, to the handlers around it, as an editor
+	// scrolls under what it shows over its text. Scroll containers move
+	// only when no handler takes it, so a handler around one, as a canvas
+	// that zooms with Ctrl and the wheel, still sees it first.
+	ev := InputEvent{Kind: InputScroll, DX: dx, DY: dy, Mods: mods, Precise: precise, Momentum: momentum}
+	for _, id := range chain {
+		if s := rt.states[id]; s != nil && s.input != nil && s.flags&flagDisabled == 0 && rt.deliver(s, ev) {
+			return
+		}
 	}
 	// Shift turns the wheel sideways: down is toward the end, which is
 	// to the left right to left.
@@ -1099,7 +1110,7 @@ func (rt *engine) updateTextInput() {
 			t.Caret = bounds
 		} else {
 			r := transformRect(s.world, Rect{X: s.x, Y: s.y, W: 1, H: s.h})
-			t.Caret = platform.RectF{X: float64(r.X), Y: float64(r.Y), W: float64(r.W), H: float64(r.H)}
+			t.Caret = rt.toWindow(platform.RectF{X: float64(r.X), Y: float64(r.Y), W: float64(r.W), H: float64(r.H)})
 		}
 	} else if s != nil && s.editor == nil && s.input != nil && s.takesText && rt.windowFocus() {
 		// An element taking text itself: no text around the caret.
@@ -1115,12 +1126,12 @@ func (rt *engine) updateTextInput() {
 			r = s.caretFn()
 		}
 		r = transformRect(s.world, Rect{s.x + r.X, s.y + r.Y, r.W, r.H})
-		t.Caret = platform.RectF{X: float64(r.X), Y: float64(r.Y), W: float64(r.W), H: float64(r.H)}
+		t.Caret = rt.toWindow(platform.RectF{X: float64(r.X), Y: float64(r.Y), W: float64(r.W), H: float64(r.H)})
 	} else if s != nil && s.editor != nil && s.flags&(flagEditable|flagSelectable) != 0 && (!s.editor.readOnly || rt.nativeSelection(s)) && rt.windowFocus() {
 		ed := s.editor
 		r := ed.caretRect(s)
 		t.Active = true
-		t.Caret = platform.RectF{X: float64(r.X), Y: float64(r.Y), W: float64(r.W), H: float64(r.H)}
+		t.Caret = rt.toWindow(platform.RectF{X: float64(r.X), Y: float64(r.Y), W: float64(r.W), H: float64(r.H)})
 		t.ReadOnly = ed.readOnly
 		t.Password = ed.password
 		t.Multiline = ed.multiline
@@ -1335,8 +1346,12 @@ func (e *node) Pressed() bool {
 	return true
 }
 
-// Focused reports whether the element has the keyboard focus.
+// Focused reports whether the element has the keyboard focus: for a field
+// around an input, as SearchField's, whether its input has it.
 func (e *node) Focused() bool {
+	if e != nil && e.focusTo != nil {
+		return e.focusTo.Focused()
+	}
 	return e.hasState() && e.c.rt.focused == e.id && e.c.rt.windowFocus()
 }
 
@@ -1377,8 +1392,13 @@ func (e *node) FocusWithin() bool {
 }
 
 // Focus gives the element the keyboard focus. Called in every frame, it
-// keeps it there; AutoFocus gives it once.
+// keeps it there; AutoFocus gives it once. A field around an input, as
+// SearchField's, gives it to its input, where typing goes.
 func (e *node) Focus() *node {
+	if e != nil && e.focusTo != nil {
+		e.focusTo.Focus()
+		return e
+	}
 	if !e.hasState() {
 		return e
 	}

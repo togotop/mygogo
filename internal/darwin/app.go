@@ -45,6 +45,11 @@ type Backend struct {
 	stepping       int
 	quitAfterModal bool
 
+	// orderingChildren tells that child windows are being ordered above
+	// their parent, or out with it (child_window.go): what AppKit tells
+	// of their ordering then orders nothing more.
+	orderingChildren bool
+
 	dockProgress dockProgress
 	// openedAtLogin records whether the system started the app as a login
 	// item (WasOpenedAtLogin).
@@ -391,6 +396,7 @@ func (a appController) WithActivationToken(_ string, fn func()) { fn() }
 func (a appController) Hide()                                   { send(a.b.app, "hide:", 0) }
 func (a appController) Unhide()                                 { send(a.b.app, "unhide:", 0) }
 func (a appController) IsHidden() bool                          { return sendBool(a.b.app, "isHidden") }
+func (a appController) IsActive() bool                          { return sendBool(a.b.app, "isActive") }
 
 func (a appController) SetBadge(label string) {
 	tile := send(a.b.app, "dockTile")

@@ -38,6 +38,10 @@ func click(w *mygo.Window, x, y float64) (ok bool) {
 	return ok
 }
 
+// Clicks reach windows showing native UI only: a web view's page is
+// not clicked.
+func clickPage(*mygo.Window, float64, float64) bool { return false }
+
 // appClick clicks with the system's input, which activates windows, and
 // returns once the app handled the click.
 func appClick(w *mygo.Window, x, y float64) (ok bool) {
@@ -210,6 +214,12 @@ func titleButtonColor(w *mygo.Window, name string) (r, g, b uint8, ok bool) {
 func composition(w *mygo.Window) (noRedirect, composed, supported bool) {
 	mygo.RunOnMain(func() { noRedirect, composed = win.TestComposed(w.NativeHandle()) })
 	return noRedirect, composed, true
+}
+
+// canCompose reports whether DirectComposition is available.
+func canCompose() (ok bool) {
+	mygo.RunOnMain(func() { ok = win.TestCanCompose() })
+	return ok
 }
 
 // loseComposition takes the device of DirectComposition away, as a draw

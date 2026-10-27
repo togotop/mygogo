@@ -42,6 +42,9 @@ func click(w *mygo.Window, x, y float64) bool {
 	return true
 }
 
+// clickPage clicks a window's page: click reaches web views too.
+func clickPage(w *mygo.Window, x, y float64) bool { return click(w, x, y) }
+
 // appClick clicks through the application, whose event monitors see it.
 func appClick(w *mygo.Window, x, y float64) bool {
 	waitOnScreen(w)
@@ -198,6 +201,7 @@ func titleButtonColor(*mygo.Window, string) (uint8, uint8, uint8, bool) { return
 
 // AppKit composes the window: there is no redirection bitmap to go without.
 func composition(*mygo.Window) (bool, bool, bool) { return false, false, false }
+func canCompose() bool                            { return false }
 func loseComposition(bool) bool                   { return false }
 
 // WebKit creates web views with their windows.

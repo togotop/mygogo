@@ -48,6 +48,11 @@ func click(w *mygo.Window, x, y float64) bool {
 	return fake(func() bool { return linux.TestClickSurface(w.NativeHandle(), x, y) })
 }
 
+// clickPage clicks a window's page, through XTEST.
+func clickPage(w *mygo.Window, x, y float64) bool {
+	return fake(func() bool { return linux.TestClickPage(w.NativeHandle(), x, y) })
+}
+
 // appClick is click, already through XTEST.
 func appClick(w *mygo.Window, x, y float64) bool { return click(w, x, y) }
 
@@ -201,6 +206,7 @@ func titleButtonColor(*mygo.Window, string) (uint8, uint8, uint8, bool) { return
 
 // Linux shows no material.
 func composition(*mygo.Window) (bool, bool, bool) { return false, false, false }
+func canCompose() bool                            { return false }
 func loseComposition(bool) bool                   { return false }
 
 // WebKitGTK creates web views with their windows.

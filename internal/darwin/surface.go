@@ -256,6 +256,23 @@ func (s *surface) RequestFrame() {
 	})
 }
 
+// SetFrameRate has the display link tick fps times a second, or at the
+// display's rate for 0: on a ProMotion display, the display then refreshes
+// as often, while nothing else on it asks for more. Without a display
+// link, the timer goes on at the display's rate, and package ui draws only
+// the frames due.
+func (s *surface) SetFrameRate(fps float64) {
+	if s.link == 0 {
+		return
+	}
+	r := caFrameRateRange{} // CAFrameRateRangeDefault: the display's
+	if fps > 0 {
+		f := float32(fps)
+		r = caFrameRateRange{Minimum: f, Maximum: f, Preferred: f}
+	}
+	msgSetRateRange(s.link, sel("setPreferredFrameRateRange:"), r)
+}
+
 // FrameNow draws a frame at once, for one the display link's tick left to
 // draw until the renderer had a drawable.
 func (s *surface) FrameNow() {
@@ -651,13 +668,20 @@ func physicalKey(ev id) platform.Key {
 	return keyAtCodeForLayout(code, kbGetLayoutType(keyboardType))
 }
 
-// stringOf returns the text of an NSString or NSAttributedString.
+// stringOf returns the text of an NSString or NSAttributedString. Other
+// objects with a stringValue (an NSNumber set as an AXValue) give that text,
+// and anything else gives "".
 func stringOf(obj id) string {
 	if obj == 0 {
 		return ""
 	}
 	if respondsTo(obj, "string") {
 		obj = send(obj, "string")
+	} else if !respondsTo(obj, "UTF8String") && respondsTo(obj, "stringValue") {
+		obj = send(obj, "stringValue")
+	}
+	if !respondsTo(obj, "UTF8String") {
+		return ""
 	}
 	return goString(obj)
 }
@@ -708,8 +732,10 @@ func registerSurfaceClass() {
 			}
 			if kind == platform.PointerDown {
 				if btn == 0 {
-					release(s.w.lastMouseDown)
-					s.w.lastMouseDown = retain(ev)
+					// Native UI's drag regions drag the window
+					// (StartDrag), and its data drags start with the
+					// press.
+					s.w.pressedLeft(ev)
 				}
 				send(s.w.win, "makeFirstResponder:", uintptr(self))
 			}

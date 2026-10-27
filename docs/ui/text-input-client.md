@@ -100,7 +100,7 @@ cursor; its size, appearance and other input behavior are yours.
 | `ReplaceText(range, text)` | Commit text in an explicit range; a nil range means preedit if present, otherwise the selection. Clear preedit according to your editing policy. |
 | `SetMarkedText(range, text, selected)` | Replace preedit, retaining its marked range. `selected` is relative to the newly marked text. |
 | `UnmarkText()` | Clear marked status while retaining document text. Also called when focus is lost, the client changes, or the element is disposed. |
-| `BoundsForRange(range)` | Return element-relative text/caret geometry, the actual range represented, and whether it is available. Return false for unavailable/offscreen text. |
+| `BoundsForRange(range)` | Return element-relative text/caret geometry, the actual range represented, and whether it is available. Return false for unavailable/offscreen text. Scrolling the element into view, as the focus does, shows the caret's bounds rather than its box when they are available. |
 | `IndexForPoint(point)` | Hit-test an element-relative point and return a document offset, or false. |
 
 Ranges count **UTF-16 code units**, matching native text services and GPUI's
@@ -135,8 +135,10 @@ without overriding behavior built into a framework-owned editor.
 
 `ShapeText(text, font, width)` and `ShapeRichText(spans, font, width)` produce a
 `TextLayout` using Core Text, Pango or DirectWrite. Positive `width` wraps text;
-zero only breaks at newlines. Cache layouts by paragraph or line and replace
-only those affected by an edit.
+zero only breaks at newlines. `Font.LineHeight` sets the height of the lines
+as a multiple of the size, as `Element.LineHeight` does for `Text` (about 1.8
+suits CJK prose); 0 keeps the font's own. Cache layouts by paragraph or line
+and replace only those affected by an edit.
 
 ```go
 layout := ui.ShapeText(paragraph, ui.Font{Size: 16}, availableWidth)
@@ -157,9 +159,9 @@ queries are safe from any goroutine; painting is part of a UI frame.
 `ShapeRichTextWith` lays spans out aligned (`TextShape.Align`), as the
 paragraphs of a rich text editor. A span with an `ObjectWidth` makes its
 object replacement characters (U+FFFC) inline objects: boxes of
-`ObjectWidth`×`ObjectHeight` standing on the baseline, which lines break
-around and which draw nothing; `TextLayout.Objects` gives their boxes,
-where an editor draws its images.
+`ObjectWidth`×`ObjectHeight` standing on the baseline, `ObjectDescent`
+more below it, which lines break around and which draw nothing;
+`TextLayout.Objects` gives their boxes, where an editor draws its images.
 
 For visual navigation, retain `TextCaretPosition`, including its `Affinity`.
 `TextDownstream` chooses the following logical text's edge; `TextUpstream`

@@ -726,14 +726,22 @@ func TestGlass(t *testing.T) {
 		t.Errorf("material %s, style %d, corners %v; want the clear glass, or the HUD material before macOS 26, cut to 16", class, style, radius)
 	}
 	// Without SetActiveAppearance, a window draws as inactive once the app is.
+	// Focusing other activates the app, done once other is key: it is waited
+	// for so that the activation does not land after the Finder's and bring
+	// the app back in front.
 	other := newWindow(t, mygo.WindowOptions{Width: 200, Height: 100, Frameless: true, Transparent: true, Vibrancy: mygo.VibrancyGlassClear, Content: view})
+	other.Focus()
+	eventually(t, "the other window focused", other.IsFocused)
 	if deactivateApp() {
 		eventually(t, "the app deactivated", func() bool { active, _ := appActive(); return !active })
+		// The Finder can be frontmost before AppKit has told the app that it
+		// resigned active, which the windows draw by. So other's appearance
+		// is waited for, and w's is checked once the app is known inactive.
+		if !wait.Poll(func() bool { _, _, _, active, _ := material(other); return !active }) {
+			t.Error("a window without SetActiveAppearance draws as active with another app in front")
+		}
 		if _, _, _, active, _ := material(w); !active {
 			t.Error("with another app in front, the window no longer draws as active")
-		}
-		if _, _, _, active, _ := material(other); active {
-			t.Error("a window without SetActiveAppearance draws as active with another app in front")
 		}
 	}
 	w.SetVibrancy(mygo.VibrancyPopover)
@@ -875,6 +883,39 @@ func TestVibrancyWindowControls(t *testing.T) {
 		closeMenus()
 		eventually(t, "the menus to close", func() bool { menus, _ = popupMenus(); return len(menus) == 0 })
 	}
+}
+
+// TestWindowButtonsTheme draws the window controls of a hidden title bar
+// for a dark background in a light app and for a light one in a dark app,
+// then as the app again (Windows): under the pointer, the backplate of a
+// button is its glyph's color over the gray page, lighter for light glyphs.
+func TestWindowButtonsTheme(t *testing.T) {
+	mygo.Theme.SetSource(mygo.ThemeLight)
+	defer mygo.Theme.SetSource(mygo.ThemeSystem)
+	w := newWindow(t, mygo.WindowOptions{X: 40, Y: 40, Width: 300, Height: 150, TitleBarStyle: mygo.TitleBarHidden,
+		Content: ui.View(func(c *ui.Context) { c.Root().Background(ui.RGB(0x80, 0x80, 0x80)) })})
+	light := func() (light, ok bool) {
+		r, _, _, ok := titleButtonColor(w, "minimize")
+		return r > 0x80, ok && r != 0x80
+	}
+	if _, _, _, ok := titleButtonColor(w, "minimize"); !ok {
+		t.Skip("mygo draws the window controls on Windows")
+	}
+	readable := false
+	for deadline := time.Now().Add(3 * time.Second); !readable && time.Now().Before(deadline); time.Sleep(50 * time.Millisecond) {
+		l, ok := light()
+		readable = ok && !l
+	}
+	if !readable {
+		t.Skip("the screen does not show the dark glyphs of a light app's window controls")
+	}
+	w.SetWindowButtonsTheme(mygo.ThemeDark)
+	eventually(t, "light glyphs in a light app", func() bool { l, ok := light(); return ok && l })
+	mygo.Theme.SetSource(mygo.ThemeDark)
+	w.SetWindowButtonsTheme(mygo.ThemeLight)
+	eventually(t, "dark glyphs in a dark app", func() bool { l, ok := light(); return ok && !l })
+	w.SetWindowButtonsTheme(mygo.ThemeSystem)
+	eventually(t, "light glyphs again, as the dark app", func() bool { l, ok := light(); return ok && l })
 }
 
 // The toolbar that insets the traffic lights holds no items: in full screen
@@ -1089,6 +1130,24 @@ func TestWindowGeometryAndState(t *testing.T) {
 	w.Page().SetZoomFactor(1.5)
 	if z := w.Page().ZoomFactor(); z != 1.5 {
 		t.Errorf("zoom = %v", z)
+	}
+}
+
+// ProcessID is the page's web content process on macOS and WebView2's
+// browser process on Windows, never the app's own; Linux has none.
+func TestPageProcessID(t *testing.T) {
+	w := newWindow(t, mygo.WindowOptions{Width: 300, Height: 200})
+	w.Page().LoadHTML(`<p>process</p>`, "")
+	waitFor(t, w, "document.readyState === 'complete'")
+	pid := w.Page().ProcessID()
+	if runtime.GOOS == "linux" {
+		if pid != 0 {
+			t.Errorf("ProcessID = %d on Linux, want 0", pid)
+		}
+		return
+	}
+	if pid <= 0 || pid == os.Getpid() {
+		t.Errorf("ProcessID = %d, want another process than the app's (%d)", pid, os.Getpid())
 	}
 }
 
@@ -2299,6 +2358,80 @@ func TestWindowOpenHandler(t *testing.T) {
 	}
 }
 
+// userInitiatedPage opens a window and navigates from a timer its script
+// starts as it loads, without a user's gesture, and has three things to
+// click that do the same: a button calling window.open(), a
+// target="_blank" link, and a button setting location.href.
+const userInitiatedPage = `<!doctype html><body style="margin:0">
+<button style="position:absolute;left:0;top:0;width:200px;height:100px" onclick="window.open('https://example.com/clicked')">open</button>
+<a href="https://example.com/link" target="_blank" style="position:absolute;left:0;top:100px;width:200px;height:100px;display:block">link</a>
+<button style="position:absolute;left:200px;top:0;width:200px;height:100px" onclick="location.href = 'https://example.com/went'">go</button>
+<script>setTimeout(() => { window.open('https://example.com/timer'); location.href = 'https://example.com/moved' }, 0)</script>
+</body>`
+
+// TestUserInitiated checks that WindowOpenRequest.UserInitiated and
+// NavigateEvent.UserInitiated are false for what a page's script does on
+// its own, and, where the tests can click a page, true for what a click
+// does, its handler's window.open() and location.href included.
+func TestUserInitiated(t *testing.T) {
+	w := newWindow(t, mygo.WindowOptions{Width: 400, Height: 300})
+	opens := make(chan mygo.WindowOpenRequest, 4)
+	w.Page().SetWindowOpenHandler(func(req mygo.WindowOpenRequest) *mygo.WindowOptions {
+		opens <- req
+		return nil
+	})
+	type navigation struct {
+		url  string
+		user bool
+	}
+	navs := make(chan navigation, 4)
+	w.Page().OnWillNavigate(func(e *mygo.NavigateEvent) {
+		navs <- navigation{e.URL, e.UserInitiated}
+		e.PreventDefault() // the page stays
+	})
+	opened := func(url string, user bool) {
+		t.Helper()
+		select {
+		case req := <-opens:
+			if req.URL != url || req.UserInitiated != user {
+				t.Errorf("window open request %q, UserInitiated %v; want %q, %v", req.URL, req.UserInitiated, url, user)
+			}
+		case <-time.After(wait.Guard):
+			t.Fatalf("the window open handler was not asked about %s", url)
+		}
+	}
+	navigated := func(url string, user bool) {
+		t.Helper()
+		select {
+		case n := <-navs:
+			if n.url != url || n.user != user {
+				t.Errorf("navigation to %q, UserInitiated %v; want %q, %v", n.url, n.user, url, user)
+			}
+		case <-time.After(wait.Guard):
+			t.Fatalf("OnWillNavigate was not told about %s", url)
+		}
+	}
+	w.Page().LoadHTML(userInitiatedPage, "https://example.com/")
+	if runtime.GOOS != "linux" {
+		// WebKitGTK blocks a window.open() without a user's gesture
+		// itself, before asking the app.
+		opened("https://example.com/timer", false)
+	}
+	navigated("https://example.com/moved", false)
+
+	// A user clicks the window of the app in front (see TestClick).
+	w.Focus()
+	eventually(t, "the window focused", w.IsFocused)
+	if !clickPage(w, 100, 50) {
+		t.Skip("clicking a page is not automated on this platform")
+	}
+	opened("https://example.com/clicked", true)
+	clickPage(w, 100, 150)
+	opened("https://example.com/link", true)
+	clickPage(w, 300, 50)
+	navigated("https://example.com/went", true)
+}
+
 func TestMenuActivation(t *testing.T) {
 	w := newWindow(t, mygo.WindowOptions{Width: 400, Height: 300})
 	w.Page().LoadHTML("<p>menus</p>", "")
@@ -3327,6 +3460,54 @@ func TestContentWindowVibrancy(t *testing.T) {
 
 	w.SetVibrancy(mygo.VibrancyNone)
 	eventually(t, "the view told no material shows", func() bool { return !shows.Load() })
+}
+
+// TestContentWindowTransparent shows a transparent window of native UI over
+// a blue one: where its view draws nothing, the screen shows the blue
+// window behind it, not black, and its opaque pane where it draws one. On
+// Windows the window has no redirection bitmap, whose opaque surface would
+// cover what is behind.
+func TestContentWindowTransparent(t *testing.T) {
+	var frames atomic.Int32
+	newWindow(t, mygo.WindowOptions{X: 40, Y: 40, Width: 400, Height: 300, Frameless: true, Content: ui.View(func(c *ui.Context) {
+		c.Root().Background(ui.RGB(0, 0, 255))
+	})})
+	view := func(c *ui.Context) {
+		frames.Add(1)
+		c.Root().Background(ui.Transparent)
+		ui.Row(c).Fill().AlignItems(ui.Stretch).Children(func() {
+			ui.Box(c).Width(200)
+			ui.Box(c).Grow(1).Background(ui.RGB(255, 0, 0))
+		})
+	}
+	w := newWindow(t, mygo.WindowOptions{X: 40, Y: 40, Width: 400, Height: 300, Frameless: true, Transparent: true, AlwaysOnTop: true, Content: ui.View(view)})
+	eventually(t, "a frame", func() bool { return frames.Load() > 0 })
+	noRedirect, _, onWindows := composition(w)
+	if !onWindows {
+		t.Skip("reads the screen through a window of Windows")
+	}
+	if !canCompose() {
+		t.Skip("no DirectComposition: the window keeps its bitmap")
+	}
+	if !noRedirect {
+		t.Fatal("a transparent window of native UI has a redirection bitmap")
+	}
+	color := func(x float64, want func(r, g, b uint8) bool) func() bool {
+		return func() bool { r, g, b, ok := screenColor(w, x, 150); return ok && want(r, g, b) }
+	}
+	red := color(300, func(r, g, b uint8) bool { return r > 200 && g < 60 && b < 60 })
+	// Some displays, as the Windows ARM64 runners', never show GDI what
+	// DirectComposition composes: there the pane never reads, as in
+	// TestContentWindowVibrancy, and nothing tells it apart from a pane not
+	// shown yet.
+	readable := false
+	for deadline := time.Now().Add(3 * time.Second); !readable && time.Now().Before(deadline); time.Sleep(50 * time.Millisecond) {
+		readable = red()
+	}
+	if !readable {
+		t.Skip("the screen does not show the window's pane: not reading what is behind it")
+	}
+	eventually(t, "the window behind, beside the pane", color(100, func(r, g, b uint8) bool { return b > 200 && r < 60 && g < 60 }))
 }
 
 // TestContentWindowRepaintsWhatChanged moves the red row of a window of

@@ -215,7 +215,9 @@ var (
 
 	// dwmapi
 	procDwmSetWindowAttribute        = dwmapi.NewProc("DwmSetWindowAttribute")
+	procDwmGetWindowAttribute        = dwmapi.NewProc("DwmGetWindowAttribute")
 	procDwmExtendFrameIntoClientArea = dwmapi.NewProc("DwmExtendFrameIntoClientArea")
+	procDwmFlush                     = dwmapi.NewProc("DwmFlush")
 
 	// shcore
 	procGetDpiForMonitor = shcore.NewProc("GetDpiForMonitor")
@@ -250,6 +252,7 @@ const (
 	wmQuit              = 0x0012
 	wmEraseBkgnd        = 0x0014
 	wmEndSession        = 0x0016
+	wmShowWindow        = 0x0018
 	wmSettingChange     = 0x001A
 	wmGetMinMaxInfo     = 0x0024
 	wmWindowPosChanging = 0x0046
@@ -416,9 +419,13 @@ const (
 
 	idcArrow = 32512
 
+	dwmwaExtendedFrameBounds    = 9
 	dwmwaUseImmersiveDarkMode   = 20
 	dwmwaWindowCornerPreference = 33
+	dwmwaCaptionColor           = 35
 	dwmwaSystemBackdropType     = 38
+
+	dwmColorNone = 0xFFFFFFFE // DWMWA_COLOR_NONE: no color, not the accent
 
 	dwmwcpRound = 2 // DWM_WINDOW_CORNER_PREFERENCE
 

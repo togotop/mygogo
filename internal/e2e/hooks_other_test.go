@@ -22,6 +22,8 @@ func click(*mygo.Window, float64, float64) bool { return false }
 
 func appClick(*mygo.Window, float64, float64) bool { return false }
 
+func clickPage(*mygo.Window, float64, float64) bool { return false }
+
 func heldAppClick(*mygo.Window, float64, float64) bool { return false }
 
 func drag(*mygo.Window, [][2]float64) bool { return false }
@@ -89,6 +91,7 @@ func menuBarColors(*mygo.Window) (uint32, uint32, bool) { return 0, 0, false }
 func titleButtonColor(*mygo.Window, string) (uint8, uint8, uint8, bool) { return 0, 0, 0, false }
 
 func composition(*mygo.Window) (bool, bool, bool) { return false, false, false }
+func canCompose() bool                            { return false }
 func loseComposition(bool) bool                   { return false }
 
 func failWebViews(int) bool { return false }

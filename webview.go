@@ -78,7 +78,7 @@ func (w *Window) newWebView(opts WebViewOptions, bg *background) (*WebView, erro
 
 	// The web view's page lives in a Window of its own, which no list
 	// holds: everything a page does works through it as for a window.
-	pw := &Window{id: id, host: w, trustedOrigins: opts.Page.TrustedOrigins, secret: randomText(), background: bg}
+	pw := &Window{id: id, host: w, trustedOrigins: opts.Page.TrustedOrigins, untrusted: opts.Page.Untrusted, secret: randomText(), background: bg}
 	pw.pg = &Page{pw}
 	pw.resetPage()
 	popts := pw.platformOptions(&WindowOptions{Page: opts.Page, Transparent: opts.Transparent})
@@ -287,6 +287,10 @@ func (n *webViewNative) SetZoom(factor float64) { n.web.SetZoom(factor) }
 func (n *webViewNative) Zoom() float64          { return n.web.Zoom() }
 func (n *webViewNative) SetUserAgent(ua string) { n.web.SetUserAgent(ua) }
 func (n *webViewNative) UserAgent() string      { return n.web.UserAgent() }
+func (n *webViewNative) ProcessID() int         { return n.web.ProcessID() }
+func (n *webViewNative) IsAudible() bool        { return n.web.IsAudible() }
+func (n *webViewNative) SetAudioMuted(v bool)   { n.web.SetAudioMuted(v) }
+func (n *webViewNative) IsAudioMuted() bool     { return n.web.IsAudioMuted() }
 func (n *webViewNative) OpenDevTools()          { n.web.OpenDevTools() }
 func (n *webViewNative) CloseDevTools()         { n.web.CloseDevTools() }
 func (n *webViewNative) IsDevToolsOpened() bool { return n.web.IsDevToolsOpened() }

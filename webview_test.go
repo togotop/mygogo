@@ -6,6 +6,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"slices"
 	"strings"
 	"testing"
 
@@ -30,6 +31,12 @@ func (pageService) Where(ctx context.Context) string {
 // view, its page loaded.
 func webViewWindow(t *testing.T, show *bool) (*Window, *WebView, *fake.Surface, *fake.WebView) {
 	t.Helper()
+	return webViewWindowOpts(t, show, WebViewOptions{})
+}
+
+// webViewWindowOpts is webViewWindow for a web view made with opts.
+func webViewWindowOpts(t *testing.T, show *bool, opts WebViewOptions) (*Window, *WebView, *fake.Surface, *fake.WebView) {
+	t.Helper()
 	var v *WebView
 	w, _, s := contentWindow(t, func(c *ui.Context) {
 		ui.Column(c).Fill().AlignItems(ui.Stretch).Children(func() {
@@ -39,7 +46,7 @@ func webViewWindow(t *testing.T, show *bool) (*Window, *WebView, *fake.Surface, 
 			}
 		})
 	})
-	v, err := w.NewWebView(WebViewOptions{})
+	v, err := w.NewWebView(opts)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -189,6 +196,20 @@ func TestWebViewPage(t *testing.T) {
 	}
 	if got := v.Page().URL(); got != "https://example.com/" {
 		t.Errorf("URL %q", got)
+	}
+	fv.SetProcessID(31)
+	if got := v.Page().ProcessID(); got != 31 {
+		t.Errorf("ProcessID %d, want 31", got)
+	}
+	v.Page().SetAudioMuted(true)
+	if !fv.IsAudioMuted() || !v.Page().IsAudioMuted() {
+		t.Errorf("SetAudioMuted: the web view's %v, the page's %v", fv.IsAudioMuted(), v.Page().IsAudioMuted())
+	}
+	var audible []bool
+	v.Page().OnAudibleChanged(func(a bool) { audible = append(audible, a) })
+	onMain(func() { fv.SetAudible(true) })
+	if !v.Page().IsAudible() || !slices.Equal(audible, []bool{true}) {
+		t.Errorf("a web view playing: IsAudible %v, changes %v", v.Page().IsAudible(), audible)
 	}
 }
 

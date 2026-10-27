@@ -44,6 +44,7 @@ on the screen. Sizes and positions are in device-independent pixels.
 | `Width`, `Height` | the size of the window, or of what it shows with `UseContentSize` |
 | `X`, `Y` | the top-left corner; the window is centered when both are 0 |
 | `MinWidth`, `MinHeight`, `MaxWidth`, `MaxHeight` | limits of resizing; 0 means none |
+| `FitContent` | sizes the page area to its page's content, and follows it, within the limits above, as a [flyout's](#size-a-flyout-to-its-content) |
 | `StateKey` | remembers the window's bounds and state under this key, see [below](#remember-where-windows-were) |
 | `Hidden` | creates the window without showing it |
 | `Maximized`, `FullScreen` | creates it maximized or in full screen |
@@ -52,11 +53,11 @@ on the screen. Sizes and positions are in device-independent pixels.
 | `TrafficLightPosition` | moves the window buttons of a hidden title bar (macOS) |
 | `TitleBarHeight` | the height of the title bar the page draws under the window buttons (Linux, Windows) |
 | `HideWindowButtons` | hides the window buttons of a hidden title bar, which keeps its resizing top edge, shadow and corners: the page draws its own and calls `Minimize`, `Maximize`, `Unmaximize` and `Close` |
-| `Transparent`, `Vibrancy` | a transparent window, and the material behind a transparent page or [native UI](ui/windows.md) (macOS, Windows 11 22H2): `VibrancyGlass` and `VibrancyGlassClear` are macOS 26's Liquid Glass. On Windows, a window with a material has no menu bar: Alt and F10 open its menus in a popup |
+| `Transparent`, `Vibrancy` | a transparent window, and the material behind a transparent page or [native UI](ui/windows.md) (macOS, Windows 11 22H2): `VibrancyGlass` and `VibrancyGlassClear` are macOS 26's Liquid Glass. On Windows, a transparent window of native UI shows what is behind it where it draws nothing, and a window with a material has no menu bar: Alt and F10 open its menus in a popup |
 | `CornerRadius` | rounds a frameless window's corners: its content and material are cut to them on macOS, and Windows 11 gives it its own rounded corners |
 | `BackgroundColor` | fills the window until the page paints, in CSS syntax such as `"#1e1e1e"`, or `"light-dark(#f5f5f7, #1e1e1e)"` to follow the appearance |
 | `Opacity` | between 0 and 1 |
-| `DisableResize`, `DisableMove`, `DisableMinimize`, `DisableMaximize`, `DisableClose`, `DisableFullScreen`, `DisableShadow` | take abilities away |
+| `DisableResize`, `DisableMove`, `DisableMinimize`, `DisableMaximize`, `DisableClose`, `DisableFullScreen`, `DisableShadow` | take abilities away. On Linux under Wayland, `DisableShadow` keeps a frameless window or a hidden title bar without the shadow and border GTK draws around them |
 | `AlwaysOnTop` | keeps the window above others |
 | `SkipTaskbar` | leaves the window out of the taskbar (Linux, Windows) |
 | `AutoHideMenuBar` | shows the menu bar only while the keyboard is in it, from Alt or F10 (Linux, Windows), see [the menu bar](menus.md#the-menu-bar) |
@@ -157,7 +158,8 @@ Other properties:
   `SetAlwaysOnTop`, `SetOpacity`, `SetHasShadow`, `SetBackgroundColor` and
   `SetVibrancy` change what the options set. On Windows, `SetVibrancy`
   changes the material of a window created with one, and shows none in
-  other windows.
+  other windows. On Linux, a window keeps the shadow it was created with
+  (`DisableShadow`).
 - `SetIcon(png)` gives the window its own icon in its title bar and taskbar
   button (Linux, Windows).
 - `SetSkipTaskbar` hides the window from the taskbar (Linux, Windows).
@@ -176,6 +178,11 @@ Other properties:
   (`VibrancyGlassClear`) of a panel floating over it stays clear. It uses a
   private AppKit call, which a later macOS may drop: apps for the Mac App
   Store should leave it off.
+- `SetWindowButtonsTheme(mygo.ThemeDark)` draws the window buttons of a
+  hidden title bar for a dark background in a light app, as over a dark
+  view at the top of the page, and `ThemeLight` for a light one;
+  `ThemeSystem` follows the app again. The page and the menus keep the
+  app's appearance (Windows; the buttons of macOS and Linux keep it).
 - `SetProgressBar` shows the progress of a task on the taskbar button
   (Windows), the Dock icon (macOS) or the launcher entry (Linux docks that
   support it):
@@ -192,8 +199,12 @@ Other properties:
 
 ## Child and modal windows
 
-A window with a `Parent` stays above it. With `Modal`, it also blocks its
-parent until it closes, like a dialog:
+A window with a `Parent` stays above it and closes with it. It can go to
+any display, and stays where it is as its parent moves, on every platform.
+On macOS it is ordered above its parent whenever the parent comes in
+front, stays above a parent that is `AlwaysOnTop`, goes with it into
+full screen, and hides while the parent is minimized or hidden. With `Modal`,
+it also blocks its parent until it closes, like a dialog:
 
 ```go
 prefs := mygo.NewWindow(mygo.WindowOptions{
@@ -320,6 +331,45 @@ Linux's tray icons tell neither clicks nor where they are: open the flyout
 from a menu item of the icon there, and it shows in the middle of the
 primary display's work area. `examples/menubar-flyout` is such an app.
 
+### Size a flyout to its content
+
+With `FitContent`, a flyout takes the size of its page's content and
+follows it as it changes, as browsers size the popups of their
+extensions: a menu bar popover with a list, a hover card, a launcher's
+results. `Width` and `Height` are its size only until the page tells its
+own, which it does before its DOM is ready, so a flyout created `Hidden`
+and shown from `OnReadyToShow` shows at its size. `MinWidth`, `MinHeight`,
+`MaxWidth` and `MaxHeight` bound it, and the work area, as any flyout:
+
+```go
+fl := mygo.NewFlyout(mygo.FlyoutOptions{
+	Tray:       tray,
+	Placement:  mygo.PlacementBottom,
+	FitContent: true,
+	MaxWidth:   400,
+	MaxHeight:  600,
+	URL:        "/panel",
+})
+```
+
+MyGo's runtime in the page lays its root element (`html`) out at the
+width of its content (`width: max-content`), within the limits, so that
+its text wraps at `MaxWidth`, and watches its size with a
+`ResizeObserver`: its height is its content's, the body's margins
+included, beyond `MaxHeight` the page scrolls, and the room its
+scrollbar takes then is part of the size. A page that gives `html` a size of its own,
+as `height: 100%`, keeps the flyout at that size: let the root and the
+body take their content's. The size is the page's CSS pixels times its
+zoom, in DIPs, and a size that changes nothing resizes nothing. Native
+UI (`Content`) does not fit.
+
+`WindowOptions.FitContent` does the same for the page area of a window,
+a [panel](#panels) for one, within its `MinWidth`, `MinHeight`,
+`MaxWidth` and `MaxHeight` and the work area of its display. It follows
+the content only when the content's size changes, and only in the
+dimension that changed, so a size the user gives a resizable window holds
+until then, and not while the window is maximized or in full screen.
+
 How each platform shows them:
 
 | | macOS | Linux | Windows |
@@ -382,6 +432,10 @@ mygo.App.WhenReady(func() {
 	})
 })
 ```
+
+A panel whose results grow and shrink, as a launcher's, takes its page's
+size with `FitContent`, as [a flyout](#size-a-flyout-to-its-content)
+does: give it `MaxHeight` rather than a `Height` to pick.
 
 An Escape the page does not handle (`preventDefault()`) or native UI
 leaves closes a panel, as the user closing it, which `OnClose` listeners
@@ -500,13 +554,15 @@ Page events, on `win.Page()`:
 
 | Event | When |
 |---|---|
-| `OnWillNavigate(func(e *mygo.NavigateEvent))` | the page is about to navigate, for example after a click on a link; `e.PreventDefault()` cancels it. Not called for `LoadURL` and its siblings. |
+| `OnWillNavigate(func(e *mygo.NavigateEvent))` | the page is about to navigate, for example after a click on a link; `e.PreventDefault()` cancels it. `e.UserInitiated` says whether a user's gesture started it, a click on a link or a click whose handler sets `location.href`, or the page's script did on its own. Not called for `LoadURL` and its siblings. |
 | `OnDidNavigate(func(url string))` | a navigation committed |
 | `OnDOMReady` | the page's DOM is ready (`DOMContentLoaded`) |
 | `OnDidFinishLoad` | the page finished loading |
 | `OnDidFailLoad(func(err *mygo.LoadError))` | the page failed to load |
 | `OnPageTitleUpdated(func(e *mygo.TitleEvent))` | the page's `<title>` changed; preventing the event keeps the window title as it is |
+| `OnThemeColorChanged(func(c color.NRGBA, ok bool))` | the page's [theme color](#the-theme-color) changed; `ok` is false when it has none any more |
 | `OnRenderProcessGone(func(reason string))` | the web content process crashed or was killed; `Reload` recovers |
+| `OnAudibleChanged(func(audible bool))` | the page started or stopped [making sound](#sound) |
 
 Keep a window on the app's own pages and open other links in the browser:
 
@@ -524,6 +580,84 @@ check the host, or `mygo.IsDev()`, when your rule depends on the scheme.
 
 Links that open new windows go through the window's open handler, see
 [links and new windows](frontend.md#links-and-new-windows).
+
+### The theme color
+
+`ThemeColor` returns the page's theme color, its `<meta name="theme-color">`,
+so that the app can tint its title bar, toolbar or window background to
+match the page, as Safari does; `OnThemeColorChanged` tells when it
+changes:
+
+```go
+page := win.Page()
+page.OnThemeColorChanged(func(c color.NRGBA, ok bool) {
+	if !ok {
+		c = defaultToolbarColor // the page has none
+	}
+	toolbar.SetBackground(ui.RGB(c.R, c.G, c.B))
+})
+```
+
+A page may have one color for light appearance and another for dark, with
+the metas' `media`:
+
+```html
+<meta name="theme-color" content="#ffffff" media="(prefers-color-scheme: light)">
+<meta name="theme-color" content="#111111" media="(prefers-color-scheme: dark)">
+```
+
+The color is the content of the first meta named `theme-color` in the
+page's `<head>` whose `media` is absent or matches, and whose content is a
+color, as browsers pick it. The page's engine computes it, so any CSS color
+works (`dodgerblue`, `rgb(30 144 255 / 50%)`, `oklch(…)`), and it comes as
+8-bit sRGB with straight alpha. The event fires only when the color
+changes: when the page adds, removes or changes its metas, when the app's
+appearance ([`Theme`](native.md#dark-mode)) changes and another meta's
+`media` matches, and when another page has another color. A page that just started loading
+keeps the color of the one before until its DOM is ready, so going between
+pages of the same color fires nothing.
+
+MyGo's runtime in the page watches the metas, the same way on every
+platform, in pages of any origin, trusted or not. A page the runtime does
+not run in, as an image or a PDF the web view shows, has no theme color.
+
+### Sound
+
+`IsAudible` tells whether a page is making sound, from any of its frames,
+a video of another site included, and `OnAudibleChanged` when that
+changes, for a speaker on a tab or a window, or a media app's state.
+`SetAudioMuted` mutes the whole page, as a browser mutes a tab, without the
+page seeing its elements muted; it lasts as the page navigates:
+
+```go
+page := win.Page()
+page.OnAudibleChanged(func(audible bool) {
+	log.Println("playing:", audible) // show a speaker on the window's tab
+})
+
+// A menu item that mutes or unmutes the window it was chosen for.
+mute := &mygo.MenuItem{Label: "Mute or Unmute Window", Click: func(_ *mygo.MenuItem, win *mygo.Window) {
+	if win == nil || win.Page() == nil {
+		return // no window, or one showing native UI
+	}
+	win.Page().SetAudioMuted(!win.Page().IsAudioMuted())
+}}
+```
+
+A page muted right after `NewWindow` starts muted, even where its web view
+is not made yet. A muted page can still be audible, as a tab shows a
+crossed-out speaker; the engine decides when a paused or silent source stops
+counting, which can take a moment after the sound stops.
+
+| Platform | Making sound | Muting |
+|---|---|---|
+| macOS | WebKit's private `_isPlayingAudio`, observed; false if WebKit stops answering it | WebKit's private `_setPageMuted:`, as Safari mutes a tab; does nothing if WebKit stops answering it |
+| Windows | `IsDocumentPlayingAudio` of WebView2 (`ICoreWebView2_8`); false on runtimes older than it | `IsMuted` of the same; does nothing on older runtimes |
+| Linux | `webkit_web_view_is_playing_audio` | `webkit_web_view_set_is_muted`, WebKitGTK 2.30 or later; does nothing on older versions |
+
+Where a platform can't mute, `IsAudioMuted` is false. Both are false for a
+window showing native UI and after the window closed. A [web view's](ui/web-view.md)
+page has them too.
 
 ### Find in page
 
@@ -591,7 +725,8 @@ win.Page().OnDownloadDone(func(d *mygo.Download) {
 ### Permissions
 
 Pages ask for the camera, the microphone, the location or notifications.
-By default the app's own pages get what they ask for and other pages get
+By default the app's own pages, those of custom schemes included (see
+[trust](frontend.md#trust)), get what they ask for and other pages get
 nothing. `Page.SetPermissionHandler` decides instead; it runs on the main
 thread:
 
@@ -681,6 +816,25 @@ adopts. There:
 of a page control its inspector, when it has one, see
 [the web inspector](frontend.md#the-web-inspector).
 
+### The page's process
+
+`ProcessID` returns the ID of the operating system's process that runs a
+page, for an app's own task manager, memory reports or telling which window
+a busy process belongs to; 0 when it is unknown:
+
+```go
+pid := win.Page().ProcessID()
+```
+
+| Platform | The process |
+|---|---|
+| macOS | the page's web content process (`com.apple.WebKit.WebContent`), from WebKit's private `_webProcessIdentifier`; 0 if WebKit stops answering it. A page may move to another process when it navigates to another site or after its process crashed, so ask again rather than keep the ID |
+| Windows | WebView2's browser process (`msedgewebview2.exe`), which the app's web views share and whose children render the pages |
+| Linux | none: WebKitGTK has no API for the process of a page, so it is always 0 |
+
+It is 0 too before the web view has started a process, after the window
+closed, and for a window showing native UI.
+
 ## Finding windows
 
 - `mygo.Windows()` lists the open windows, `mygo.FocusedWindow()` returns
@@ -688,7 +842,9 @@ of a page control its inspector, when it has one, see
   pages know as `runtime().windowId`.
 - `mygo.CallerWindow(ctx)` returns the window whose page called a bound
   method, and `mygo.CallerPage(ctx)` the page: the window's, or that of a
-  web view in a window of native UI ([Web view](ui/web-view.md)).
+  web view in a window of native UI ([Web view](ui/web-view.md)). Given
+  the `r.Context()` of a request to a custom scheme, they return the
+  window and the page that made it.
 - `mygo.App.OnWindowCreated` is called for every new window.
 
 ## Native access
