@@ -19,6 +19,8 @@ func (w *window) SetMaximumSize(s platform.Size) {}
 
 func (w *window) SetResizable(v bool) {}
 
+func (w *window) SetWindowButtonsTheme(source string) {}
+
 func (w *window) IsResizable() bool { return false }
 
 func (w *window) SetMovable(v bool) {}
@@ -145,6 +147,14 @@ func (w *window) Zoom() float64 { return 0 }
 func (w *window) SetUserAgent(ua string) {}
 
 func (w *window) UserAgent() string { return "" }
+
+func (w *window) ProcessID() int { return 0 }
+
+func (w *window) IsAudible() bool { return false }
+
+func (w *window) SetAudioMuted(muted bool) {}
+
+func (w *window) IsAudioMuted() bool { return false }
 
 func (w *window) OpenDevTools() {}
 
