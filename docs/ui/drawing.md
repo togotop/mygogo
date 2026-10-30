@@ -2,7 +2,8 @@
 
 `Draw` paints on an element after its background, and `DrawOver` after its
 children, with a `*ui.Painter` in DIPs of the window: rectangles with
-`Fill`, `FillGradient`, `Stroke` and `StrokeDashed`, `Shadow`, `Line`,
+`Fill`, `FillGradient`, `FillConicGradient` and `FillRadialGradient`,
+`Stroke` and `StrokeDashed`, `Shadow`, `Line` (horizontal or vertical),
 `Image`, `Clip`, paths of lines and curves with `FillPath` and
 `StrokePath`, or in a gradient with `FillPathGradient` and
 `StrokePathGradient`, and text with `Text`, or `RichText` in spans of any
@@ -31,6 +32,12 @@ ui.Box(c).Size(200, 40).Draw(func(p *ui.Painter, r ui.Rect) {
 	p.RichText(r.X+(r.W-w)/2, r.Y+(r.H-h)/2, 0, label)
 })
 ```
+
+Paragraphs a view lays out itself, as the pages of a book reader, are
+shaped once with `ui.ShapeRichTextWith`, justified and indented if need
+be, and drawn with `Painter.TextLayout`; their `Lines` tell where each
+line is, to break pages between them (see [retained text
+geometry](text-input-client.md#retained-text-geometry)).
 
 Draw functions only paint: MyGo may call them more than once a frame.
 `Painter.Icon` and `Painter.Image` draw SVGs and bitmaps,

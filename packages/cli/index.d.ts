@@ -350,6 +350,13 @@ export interface WindowsConfig {
    * the name's, e.g. `天气助手` for an app named `weather`.
    */
   displayName?: string;
+  /**
+   * The name of the folder the installer installs the app in, in
+   * `%LOCALAPPDATA%\Programs` (default: the name), e.g. an ASCII `ZhiLian`
+   * for an app named `智链`, whose shortcuts and entry in Settings > Apps
+   * keep the name. Changing it moves new installs only.
+   */
+  installDirName?: string;
   /** A code signing certificate (.pfx); its password comes from `MYGO_WINDOWS_CERTIFICATE_PASSWORD`. */
   certificate?: string;
   /** Instead of `certificate`, a command that signs a file, with `%1` for its path. */
@@ -382,11 +389,13 @@ export interface LinuxConfig {
    */
   webview?: boolean;
   /**
-   * A command that runs the app, such as `my-app`: a link in `/usr/bin` from
-   * the Debian package, and in `~/.local/bin` from install.sh (default: none;
-   * the app opens from the applications menu).
+   * A command that runs the app, such as `my-app`, or a list of names, such
+   * as `["my-app", "ma"]`, which adds a short one: a link in `/usr/bin` from
+   * the Debian package, and in `~/.local/bin` from install.sh, for each,
+   * which says to run the app by the first it links (default: none; the app
+   * opens from the applications menu).
    */
-  command?: string;
+  command?: string | string[];
 }
 
 /** C-exported Go callbacks. A negative nextDelay disables scheduling. */

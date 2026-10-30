@@ -267,7 +267,7 @@ func (c *context) rekey(e *node, k any) {
 		// Another element of the pass has the key under the same parent.
 		rt.duplicateKey(id, k)
 	}
-	e.id, e.st = id, st
+	e.id, e.st, e.key = id, st, k
 	if rt.insp.open {
 		rt.insp.noteKey(id, k)
 		if id == rt.insp.selected {
@@ -565,8 +565,11 @@ type state struct {
 	parent         uint64
 	router         *Router
 	routerLevel    int
-	flags          uint64
-	cursor         Cursor
+	// ignoreInput tells that the element, or one around it, ignores the
+	// pointer and the keyboard (IgnoreInput).
+	ignoreInput bool
+	flags       uint64
+	cursor      Cursor
 	// tip marks an element with a tooltip (TooltipBase).
 	tip bool
 	// effectLayer is what the element and its children render into for

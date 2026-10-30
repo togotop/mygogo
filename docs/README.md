@@ -87,7 +87,8 @@ What every app has, whether its windows show native UI or web pages.
   navigation, downloads, permissions, printing.
 - [The application](app.md): the lifecycle, quitting, a single instance,
   deep links, file associations, recent documents, starting at login,
-  well-known directories, the jump list, browsing data and cookies.
+  well-known directories, the jump list, browsing data, cookies and
+  sessions.
 - [Menus and the tray](menus.md): application, context and Dock menus,
   keyboard shortcuts and tray icons.
 - [Documents](documents.md): document-based apps, a window per file, with
@@ -160,6 +161,9 @@ components, from buttons to tables.
   one standard layout.
 - [Loading](plugins/loading.md): loading.dev's 29 loading indicators for
   native UI.
+- [Automation](plugins/automation.md): drive a running app from another
+  process, as end-to-end test runners and agents do: its windows,
+  elements, input, menus and screenshots.
 
 ## Reference
 

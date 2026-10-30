@@ -59,6 +59,9 @@ go func() {
 }()
 ```
 
+[`ui.Video`](video.md) plays a video's frames so, decoded ahead and each
+shown as it comes due, with animated GIFs out of the box.
+
 `Pixelated` draws a bitmap shown larger than its pixels as squares of
 their colors, as pixel art and game sprites are drawn, where it would
 blend neighbors smoothly. At whole multiples of its size each pixel is a
@@ -115,6 +118,24 @@ leaves out text, embedded images, patterns, markers and filters: convert
 text to paths in your editor before exporting.
 
 In `Draw` callbacks, `Painter.Image` draws bitmaps and SVGs too.
+
+## Pictures of any format
+
+`ui.DecodeImage` decodes a picture whose format isn't known up front, as
+one downloaded from a link: a bitmap when `DecodeBitmap` knows its format,
+else an SVG of a size. `ui.ImageSize` gives the size `Image` shows a
+bitmap or an SVG at by default, in DIPs, to size it to its aspect ratio:
+
+```go
+pic, err := ui.DecodeImage(data) // once, as it arrives, not in the view
+if err != nil {
+	return err
+}
+// … in the view:
+if w, h := ui.ImageSize(pic); w > 0 && h > 0 {
+	ui.Image(c, pic).MaxWidthPercent(100).AspectRatio(w / h)
+}
+```
 
 ## Accessibility
 

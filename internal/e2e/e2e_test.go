@@ -124,6 +124,10 @@ func TestMain(m *testing.M) {
 		cookiesWhileOpening()
 		return
 	}
+	if os.Getenv("MYGO_E2E_AUTOMATION_APP") == "1" {
+		automationApp()
+		return
+	}
 	mygo.Bind(Greeter{}, probe, streams, Bench{})
 	mux := http.NewServeMux()
 	mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
@@ -135,6 +139,15 @@ func TestMain(m *testing.M) {
 		w.Header().Set("Content-Disposition", `attachment; filename="report.bin"`)
 		io.WriteString(w, "binary report")
 	})
+	mux.HandleFunc("/capture", func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "text/html")
+		io.WriteString(w, capturePage)
+	})
+	mux.HandleFunc("/pip", func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "text/html")
+		io.WriteString(w, pipPage)
+	})
+	mux.HandleFunc("/session/", sessionPage)
 	mux.HandleFunc("POST /echo", func(w http.ResponseWriter, r *http.Request) {
 		b, _ := io.ReadAll(r.Body)
 		fmt.Fprintf(w, "echo:%s", b)
@@ -160,7 +173,9 @@ func TestMain(m *testing.M) {
 	mygo.App.OnWindowAllClosed(func() {})
 	// A window requested from a goroutine before Run waits for the app to
 	// be ready (TestEarlyWindow).
-	go func() { earlyWindow <- mygo.NewWindow(mygo.WindowOptions{Hidden: true, Title: "early"}) }()
+	go func() {
+		earlyWindow <- mygo.NewWindow(mygo.WindowOptions{Hidden: true, Title: "early", Page: firstPages()})
+	}()
 	code := 1
 	mygo.App.WhenReady(func() {
 		go func() {
@@ -182,7 +197,7 @@ func TestMain(m *testing.M) {
 // slow runner over ten seconds.
 func warmUp() {
 	start := time.Now()
-	w := mygo.NewWindow(mygo.WindowOptions{Hidden: true, Title: "warm-up"})
+	w := mygo.NewWindow(mygo.WindowOptions{Hidden: true, Title: "warm-up", Page: firstPages()})
 	defer w.Destroy()
 	ctx, cancel := context.WithTimeout(context.Background(), time.Minute)
 	defer cancel()
@@ -191,6 +206,22 @@ func warmUp() {
 	} else if d := time.Since(start); d > 3*time.Second {
 		fmt.Printf("e2e: the webview took %v to start\n", d.Round(time.Millisecond))
 	}
+}
+
+// firstPages are the options of the pages TestMain shows first, the one of
+// which that comes first decides the arguments of WebView2's browser:
+// with MYGO_E2E_UNTHROTTLED, those of ThrottlingOff
+// (TestBackgroundThrottling), and with MYGO_E2E_AUTOPLAY, AutoplayAllow's
+// (TestAutoplay).
+func firstPages() mygo.PageOptions {
+	var o mygo.PageOptions
+	if os.Getenv("MYGO_E2E_UNTHROTTLED") != "" {
+		o.BackgroundThrottling = mygo.ThrottlingOff
+	}
+	if os.Getenv("MYGO_E2E_AUTOPLAY") != "" {
+		o.Autoplay = mygo.AutoplayAllow
+	}
+	return o
 }
 
 // quitDuringDialog is a helper process for TestQuitDuringDialog: it quits
@@ -901,6 +932,13 @@ func TestWindowButtonsTheme(t *testing.T) {
 	if _, _, _, ok := titleButtonColor(w, "minimize"); !ok {
 		t.Skip("mygo draws the window controls on Windows")
 	}
+	t.Cleanup(func() {
+		if t.Failed() {
+			r, g, b, ok := titleButtonColor(w, "minimize")
+			noRedirect, composed, _ := composition(w)
+			t.Logf("the minimize button shows %02x%02x%02x (read %v); no redirection bitmap %v, composed %v", r, g, b, ok, noRedirect, composed)
+		}
+	})
 	readable := false
 	for deadline := time.Now().Add(3 * time.Second); !readable && time.Now().Before(deadline); time.Sleep(50 * time.Millisecond) {
 		l, ok := light()
@@ -1562,6 +1600,57 @@ func TestCloseInFrame(t *testing.T) {
 	w = newWindow(t, mygo.WindowOptions{StateKey: "e2e-close-" + run, Width: 100, Height: 100})
 	if b := w.Bounds(); b.Width != 320 || b.Height != 240 {
 		t.Errorf("restored bounds = %+v, want 320×240", b)
+	}
+}
+
+// TestHideInFrame hides a window from its own content as it builds a
+// frame, as a button hiding its window does, and shows it again; then
+// hides and shows it within one frame, and it stays shown.
+func TestHideInFrame(t *testing.T) {
+	var self atomic.Pointer[mygo.Window]
+	var frames, step atomic.Int32
+	var hidden, shown atomic.Bool // what IsVisible reported in the frame
+	w := newWindow(t, mygo.WindowOptions{Width: 320, Height: 240, Content: ui.View(func(c *ui.Context) {
+		frames.Add(1)
+		if w := self.Load(); w != nil {
+			switch step.Load() {
+			case 1:
+				w.Hide()
+				hidden.Store(!w.IsVisible())
+				step.Store(2)
+			case 3:
+				w.Hide()
+				w.Show()
+				shown.Store(w.IsVisible())
+				step.Store(4)
+			}
+		}
+		c.AnimationFrame()
+		ui.Box(c).Fill().Background(ui.RGB(255, 255, 255))
+	})})
+	var hides, shows atomic.Int32
+	w.OnHide(func() { hides.Add(1) })
+	w.OnShow(func() { shows.Add(1) })
+	self.Store(w)
+	before := shows.Load()
+	step.Store(1)
+	eventually(t, "the window hiding itself", func() bool { return step.Load() == 2 })
+	if !hidden.Load() || w.IsVisible() {
+		t.Fatalf("hidden in its frame: visible there %v, after %v", !hidden.Load(), w.IsVisible())
+	}
+	w.Show()
+	n := frames.Load()
+	eventually(t, "frames of the window shown again", func() bool { return frames.Load() > n+1 })
+
+	step.Store(3)
+	eventually(t, "the window hiding and showing itself", func() bool { return step.Load() == 4 })
+	n = frames.Load()
+	eventually(t, "frames of the window still shown", func() bool { return frames.Load() > n+1 })
+	if !shown.Load() || !w.IsVisible() {
+		t.Errorf("hidden and shown in its frame: visible there %v, after %v", shown.Load(), w.IsVisible())
+	}
+	if h, s := hides.Load(), shows.Load()-before; h != 2 || s != 2 {
+		t.Errorf("OnHide ran %d times, OnShow %d, want 2 each", h, s)
 	}
 }
 
@@ -3064,6 +3153,49 @@ func TestContentWindowAccessibility(t *testing.T) {
 	}
 }
 
+// TestContentWindowIgnoreInput shows a row with a button ignoring input,
+// transparent, over it: assistive technology finds the button and presses
+// it through the platform's bridge, and a click on it is the row's (#926).
+func TestContentWindowIgnoreInput(t *testing.T) {
+	var frames atomic.Int32
+	rowClicks, deletes := 0, 0
+	view := func(c *ui.Context) {
+		frames.Add(1)
+		row := ui.Row(c).Width(300).Height(40).Label("Session")
+		if row.Clicked() {
+			rowClicks++
+		}
+		row.Children(func() {
+			if ui.Button(c, "Delete").Width(100).Height(40).Opacity(0).IgnoreInput(true).Clicked() {
+				deletes++
+			}
+		})
+	}
+	get := func() (r, d int) {
+		mygo.RunOnMain(func() { r, d = rowClicks, deletes })
+		return r, d
+	}
+	w := newWindow(t, mygo.WindowOptions{Title: "Ignore input", Width: 400, Height: 200, Content: ui.View(view)})
+	eventually(t, "a frame", func() bool { return frames.Load() > 0 })
+	if _, ok := accessibility(w); !ok {
+		t.Skip("accessibility automation not available on this platform")
+	}
+	eventually(t, "the button in the tree", func() bool {
+		nodes, _ := accessibility(w)
+		return slices.ContainsFunc(nodes, func(n accessNode) bool { return n.role == roleButton && n.label == "Delete" })
+	})
+	if !accessPerform(w, "Delete", "press", "") {
+		t.Fatal("cannot press the button ignoring input")
+	}
+	eventually(t, "the press", func() bool { r, d := get(); return d == 1 && r == 0 })
+	if click(w, 50, 20) {
+		eventually(t, "the click on the row", func() bool { r, _ := get(); return r == 1 })
+		if _, d := get(); d != 1 {
+			t.Errorf("the click went to the button ignoring input: %d deletes", d)
+		}
+	}
+}
+
 // TestContentWindowObserved resizes a window of native UI and acts on its
 // elements as assistive technology does while key-value observing watches
 // them, as other code may: the runtime gives each a generated subclass of
@@ -3612,6 +3744,46 @@ func TestContentWindowMenuButton(t *testing.T) {
 		menus, _ = popupMenus()
 		return len(menus) == 0
 	})
+}
+
+// TestContentWindowPopoverMenuButton opens the drawn menu of a menu
+// button as the button goes down, with no menu of the system's, and
+// chooses an item with the keys.
+func TestContentWindowPopoverMenuButton(t *testing.T) {
+	var frames atomic.Int32
+	var chosen atomic.Value
+	chosen.Store("")
+	// built counts the runs of the menu's function, which runs in each
+	// frame while the menu shows.
+	var built atomic.Int32
+	view := func(c *ui.Context) {
+		frames.Add(1)
+		ui.Box(c).Fill().Padding(20).Children(func() {
+			ui.PopoverMenuButton(c, "Export", func(m *ui.Menu) {
+				built.Add(1)
+				for _, label := range []string{"As PDF", "As PNG"} {
+					if m.Item(label).Chosen() {
+						chosen.Store(label)
+					}
+				}
+			}).Size(120, 40)
+		})
+	}
+	w := newWindow(t, mygo.WindowOptions{Title: "Drawn menu button", Width: 400, Height: 300, Content: ui.View(view)})
+	eventually(t, "a frame", func() bool { return frames.Load() > 0 })
+	if !click(w, 80, 40) {
+		t.Skip("pointer automation not available on this platform")
+	}
+	eventually(t, "the menu", func() bool { return built.Load() > 0 })
+	if menus, ok := popupMenus(); ok && len(menus) != 0 {
+		t.Errorf("the system shows a menu too: %q", menus)
+	}
+	if !pressKeys("Down") {
+		t.Skip("key automation not available on this platform")
+	}
+	pressKeys("Down")
+	pressKeys("Return")
+	eventually(t, "the choice", func() bool { return chosen.Load() == "As PNG" })
 }
 
 // TestReorderByDragging drags a row of a list below another with the

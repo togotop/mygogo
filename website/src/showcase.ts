@@ -28,7 +28,8 @@ export const showcase: ShowcaseApp[] = [
       "An open-source music player for macOS, Windows and Linux. One search looks through YouTube Music and Spotify, and one queue and library mix tracks from both.",
     url: "https://github.com/fzn0x/mixmusic",
     author: "fzn0x",
-    mode: "web",
+    mode: "native",
+    image: "/showcase/mixmusic.jpg",
   },
   {
     name: "Pulse",
@@ -95,5 +96,77 @@ export const showcase: ShowcaseApp[] = [
     url: "https://github.com/egoist/uma",
     author: "egoist",
     mode: "native",
+  },
+  {
+    name: "留白 Liubai",
+    description:
+      "An open-source Markdown editor and reader for macOS, with a Windows beta. The page formats as you type, the finished document reads beside it or on its own, files stay plain .md, and eleven themes follow the hours of the day or the seasons.",
+    url: "https://liubai.echovic.com",
+    author: "echoVic",
+    mode: "web",
+    image: "/showcase/liubai.jpg",
+  },
+  {
+    name: "Clipnest",
+    description:
+      "An open-source clipboard history for Mac. It keeps the text, links, code and images you copy and the snippets you reuse; press ⌘⇧V to pick one and paste it back where you were.",
+    url: "https://clipnest.echovic.com",
+    author: "echoVic",
+    mode: "web",
+    image: "/showcase/clipnest.jpg",
+  },
+  {
+    name: "Cleanzo",
+    description:
+      "An open-source disk cleaner for macOS. It clears junk, shows what fills the disk, finds large files and similar photos, uninstalls apps with their leftovers, and manages the skills used by AI tools like Claude Code and Codex.",
+    url: "https://cleanzo.echovic.com",
+    author: "echoVic",
+    mode: "web",
+    image: "/showcase/cleanzo.jpg",
+  },
+  {
+    name: "小海底 Little Reef",
+    description:
+      "A quiet, open-source focus timer for Mac. Every session you finish grows the seagrass a little and now and then a fish drops by; it also has a visitor log, 20 ambient sounds and a desktop widget.",
+    url: "https://reef.echovic.com",
+    author: "echoVic",
+    mode: "web",
+    image: "/showcase/little-reef.jpg",
+  },
+  {
+    name: "MyTwig",
+    description:
+      "A Git client for macOS, Windows and Linux. A commit graph of every branch, diffs and a conflict editor, with GitHub pull requests, Jenkins pipelines and Jira issues built in, plus optional AI with your own provider or CLI: explain a commit or a change, search history in plain words, plan Git steps to run and undo, and write commit messages and pull request descriptions.",
+    url: "https://mytwig.herosizy.dev",
+    author: "HeroSizy",
+    mode: "native",
+    image: "/showcase/mytwig.svg",
+  },
+  {
+    name: "Godwit",
+    description:
+      "An open-source, AI-native email client for macOS, Windows and Linux. It works with any IMAP/SMTP account, and its assistant reads, summarizes, translates and drafts mail with the model you choose; skills, plugins and MCP servers extend it.",
+    url: "https://godwit.email",
+    author: "baranwang",
+    mode: "native",
+    image: "/showcase/godwit.jpg",
+  },
+  {
+    name: "Video-Downloader",
+    description:
+      "Native desktop video downloader built with Go, MyGo, yt-dlp, and FFmpeg. The application analyzes videos and playlists, lets users choose quality, audio, subtitles, and containers, manages downloads in a queue, converts local media, and stores download history.",
+    url: "https://github.com/fazi-gondal/video-downloader-mygo",
+    author: "Faizan",
+    mode: "native",
+    image: "/showcase/downloader.jpg",
+  },
+  {
+    name: "Lumilo",
+    description:
+      "A menu-bar panel for local LLM engines on macOS. Start and stop Splash or llama.cpp, watch memory and speed, get models from Hugging Face and launch coding agents against the local server.",
+    url: "https://github.com/kotuke/lumilo",
+    author: "kotuke",
+    mode: "native",
+    image: "/showcase/lumilo.jpg",
   },
 ]

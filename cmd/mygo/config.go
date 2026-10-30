@@ -8,6 +8,7 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
+	"slices"
 	"strings"
 	"unicode"
 
@@ -401,11 +402,21 @@ func (c *Config) validate() error {
 	if strings.ContainsFunc(c.Windows.DisplayName, unicode.IsControl) {
 		return fmt.Errorf("windows.displayName %q cannot hold control characters, such as line breaks", c.Windows.DisplayName)
 	}
+	if n := c.Windows.InstallDirName; n != "" {
+		if err := checkFolderName(n); err != nil {
+			return fmt.Errorf("windows.installDirName %q is the name of the app's folder, which %w", n, err)
+		}
+	}
 	if c.Slug != "" && !slugRe.MatchString(c.Slug) {
 		return fmt.Errorf("slug %q is not a slug (lower-case letters and digits, with single hyphens between them)", c.Slug)
 	}
-	if cmd := c.Linux.Command; cmd != "" && !commandRe.MatchString(cmd) {
-		return fmt.Errorf("linux.command %q is not a command name (a letter or digit, then letters, digits, ., _, + or -)", cmd)
+	for i, cmd := range c.Linux.Command {
+		if !commandRe.MatchString(cmd) {
+			return fmt.Errorf("linux.command %q is not a command name (a letter or digit, then letters, digits, ., _, + or -)", cmd)
+		}
+		if slices.Contains(c.Linux.Command[:i], cmd) {
+			return fmt.Errorf("linux.command names %q twice", cmd)
+		}
 	}
 	if c.Updates != nil {
 		if err := c.Updates.validate(); err != nil {
@@ -589,6 +600,38 @@ func (c *Config) shortcutName() string {
 		return name
 	}
 	return c.executableName()
+}
+
+// installDirName returns the name of the app's install folder on Windows:
+// windows.installDirName, or else Name made a file name.
+func (c *Config) installDirName() string {
+	if n := strings.TrimSpace(c.Windows.InstallDirName); n != "" {
+		return n
+	}
+	return fsName(c.Name)
+}
+
+// reservedFileName matches the names Windows keeps for devices, which no
+// file or folder can have, with an extension or without.
+var reservedFileName = regexp.MustCompile(`(?i)^(con|prn|aux|nul|com[0-9¹²³]|lpt[0-9¹²³])(\..*)?$`)
+
+// checkFolderName reports why name, trimmed, cannot name a folder on
+// Windows: it is empty, "." or "..", holds a path separator or another
+// character file names cannot hold, ends with a dot, which Windows drops,
+// or is the name of a device.
+func checkFolderName(name string) error {
+	name = strings.TrimSpace(name)
+	switch {
+	case name == "":
+		return errors.New("is empty")
+	case strings.ContainsFunc(name, func(r rune) bool { return unicode.IsControl(r) || strings.ContainsRune(`/\:*?"<>|`, r) }):
+		return errors.New(`cannot hold control characters, path separators or :*?"<>|`)
+	case strings.HasSuffix(name, "."):
+		return errors.New("cannot be . or .., or end with a dot")
+	case reservedFileName.MatchString(name):
+		return errors.New("is the name of a device on Windows")
+	}
+	return nil
 }
 
 // slug returns Slug, or else Name as slugify makes it.

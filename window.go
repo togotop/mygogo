@@ -65,6 +65,7 @@ type WindowOptions struct {
 	Title string
 	// URL is loaded right after the window is created. "/" and other URLs
 	// without a scheme are pages of the app's frontend (see LoadURL).
+	// Page.SessionState, when set, takes its place.
 	URL string
 
 	// Width and Height of the window in DIPs (default 800x600).
@@ -284,8 +285,10 @@ type Window struct {
 	// iframe of another origin) are ignored.
 	secret string
 	// preload is PageOptions.PreloadScript, which the scripts of the pages
-	// loaded later keep (pageScripts).
-	preload string
+	// loaded later keep (pageScripts), in their iframes too with
+	// preloadAllFrames.
+	preload          string
+	preloadAllFrames bool
 
 	// native is only accessed on the main thread; nil once destroyed.
 	native    platform.Window
@@ -321,11 +324,13 @@ type Window struct {
 	// about to be. Main thread only.
 	html *htmlDocument
 
-	mu                sync.Mutex
-	openHandler       func(WindowOpenRequest) *WindowOptions
-	permissionHandler func(PermissionRequest) bool
-	pageCtx           context.Context
-	pageCancel        context.CancelFunc
+	mu                 sync.Mutex
+	openHandler        func(WindowOpenRequest) *WindowOptions
+	permissionHandler  func(PermissionRequest) bool
+	authHandler        func(AuthRequest) AuthResponse
+	certificateHandler func(CertificateError) bool
+	pageCtx            context.Context
+	pageCancel         context.CancelFunc
 	// channels are those of the current page, by the page's id for them.
 	channels map[int64]*channel
 	// closedEarly holds the channels the current page closed before
@@ -383,6 +388,19 @@ type Window struct {
 	// only.
 	audible          bool
 	onAudibleChanged listeners[func(bool)]
+
+	// contextTarget is what the bridge recorded of the page's latest
+	// contextmenu event, until a context menu opens; shownContextMenu
+	// the menu shown last, whose items' Click is found by their weak IDs
+	// once chosen (context_menu.go). Main thread only.
+	contextTarget    *contextTarget
+	shownContextMenu *Menu
+	onContextMenu    listeners[func(*ContextMenuEvent)]
+	// capture is what the backend last told of the page's capture of
+	// each CaptureKind (CaptureStateChanged), so that listeners hear only
+	// changes. Main thread only.
+	capture               [CaptureDisplay + 1]platform.CaptureState
+	onCaptureStateChanged listeners[func(CaptureKind, CaptureState)]
 }
 
 // LoadError describes a failed page load.
@@ -528,8 +546,17 @@ func newWindow(opts WindowOptions, bg *background, native uintptr, flyout *flyou
 		restoreWindowState(w.stateKey, popts)
 	}
 	w.title = popts.Title
+	if s := opts.Page.Session; s != nil && opts.Content == nil {
+		store, err := s.attach()
+		if err != nil {
+			panic(fmt.Sprintf("mygo: cannot create window: %v", err))
+		}
+		w.joinSession(s)
+		popts.DataStore = store
+	}
 	nw, err := backend().NewWindow(popts, &windowHandler{w})
 	if err != nil {
+		w.detachSession()
 		panic(fmt.Sprintf("mygo: cannot create window: %v", err))
 	}
 	w.native = nw
@@ -547,8 +574,8 @@ func newWindow(opts WindowOptions, bg *background, native uintptr, flyout *flyou
 	windows.Unlock()
 
 	fire1(&App.onWindowCreated, w)
-	if opts.URL != "" && w.content == nil {
-		w.pg.LoadURL(opts.URL)
+	if w.content == nil {
+		w.loadPage(opts.Page.SessionState, opts.URL)
 	}
 	if !opts.Hidden {
 		w.Show()
@@ -595,9 +622,14 @@ func (w *Window) platformOptions(o *WindowOptions) *platform.WindowOptions {
 		Zoom:              po.ZoomFactor,
 		// Tab reaches every control, as desktop apps do, unless the app
 		// asked for Safari's behavior.
-		TabFocusesLinks: !po.SafariTabFocus,
-		Schemes:         Protocol.schemes(),
-		Panel:           o.Panel,
+		TabFocusesLinks:        !po.SafariTabFocus,
+		NoBackgroundThrottling: po.BackgroundThrottling == ThrottlingOff,
+		Autoplay:               po.Autoplay == AutoplayAllow,
+		SwipeNavigation:        po.SwipeNavigation,
+		PinchZoom:              po.PinchZoom,
+		Schemes:                Protocol.schemes(),
+		Panel:                  o.Panel,
+		PictureInPicture:       po.PictureInPicture,
 	}
 	if o.Panel {
 		p.Minimizable, p.Maximizable, p.Fullscreenable = false, false, false
@@ -624,7 +656,7 @@ func (w *Window) platformOptions(o *WindowOptions) *platform.WindowOptions {
 	if o.Parent != nil && o.Parent.native != nil {
 		p.Parent = o.Parent.native
 	}
-	w.preload = po.PreloadScript
+	w.preload, w.preloadAllFrames = po.PreloadScript, po.PreloadAllFrames
 	if w.fit != nil {
 		w.fit.zoom = p.Zoom
 	}
@@ -738,6 +770,35 @@ func (w *Window) close() bool {
 	}
 	w.destroy()
 	return true
+}
+
+// pageSessions are the sessions of the pages that use one other than
+// the default session (PageOptions.Session), while they do. Window has no
+// field of them: a type a Window's fields reach would keep its exported
+// methods in every app, as Window's own (the linker keeps those of the
+// types reflection may reach). Main thread only.
+var pageSessions map[*Window]*Session
+
+// joinSession records that the page uses s, which attach counted. Main
+// thread only.
+func (w *Window) joinSession(s *Session) {
+	if pageSessions == nil {
+		pageSessions = map[*Window]*Session{}
+	}
+	pageSessions[w] = s
+}
+
+// pageSession returns the session of the page, nil for the default one.
+// Main thread only.
+func (w *Window) pageSession() *Session { return pageSessions[w] }
+
+// detachSession lets the page's session go, whose store an ephemeral
+// session drops with its last page. Main thread only.
+func (w *Window) detachSession() {
+	if s := pageSessions[w]; s != nil {
+		delete(pageSessions, w)
+		s.detach()
+	}
 }
 
 // Destroy closes the window without emitting OnClose. On iOS the system
@@ -1647,7 +1708,7 @@ func (w *Window) OnHide(fn func()) (off func()) { return w.onHide.add(fn, false)
 // OnReadyToShow is called once, when the first page is ready to be
 // displayed. Create the window with Hidden and call Show here to avoid a
 // visual flash. A window showing Content is ready once it drew its first
-// frame, which a hidden window may not draw until shown.
+// frame, which a hidden window draws while hidden.
 func (w *Window) OnReadyToShow(fn func()) (off func()) { return w.onReadyToShow.add(fn, false) }
 
 // OnResize is called after the window was resized.
@@ -1762,6 +1823,7 @@ func (h *windowHandler) Closed() {
 	w.detachContent()
 	w.native = nil
 	w.destroyed.Store(true)
+	w.detachSession()
 
 	windows.Lock()
 	for i, x := range windows.list {
@@ -1914,6 +1976,7 @@ func (h *windowHandler) NavigationCommitted(url string) {
 	h.w.domReady = false
 	h.w.outMu.Unlock()
 	h.w.resetPage()
+	h.w.contextTarget = nil
 	h.w.themeColorPending = true
 	fire1(&h.w.onDidNavigate, url)
 }
@@ -1964,8 +2027,9 @@ func (h *windowHandler) NewWindow(req platform.NewWindowRequest) platform.Window
 	if o.Width == 0 && req.Width > 0 {
 		o.Width, o.Height = req.Width, req.Height
 	}
-	// The webview loads the URL itself.
+	// The webview loads the URL itself, in the opener's session.
 	o.URL = ""
+	o.Page.Session = h.w.pageSession()
 	bg, err := backgroundOption(o.BackgroundColor)
 	if err != nil {
 		log.Printf("mygo: window open handler: %v", err)
@@ -1988,6 +2052,17 @@ func (h *windowHandler) AudibleChanged(audible bool) {
 	}
 	h.w.audible = audible
 	fire1(&h.w.onAudibleChanged, audible)
+}
+
+func (h *windowHandler) CaptureStateChanged(kind platform.CaptureKind, state platform.CaptureState) {
+	k := CaptureKind(kind)
+	if !k.valid() || state == h.w.capture[k] {
+		return
+	}
+	h.w.capture[k] = state
+	for _, fn := range h.w.onCaptureStateChanged.snapshot() {
+		fn(k, CaptureState(state))
+	}
 }
 
 // filesDropped tells OnFileDrop listeners, and the app's own pages, about

@@ -101,6 +101,59 @@ func TestWebViewTabFocus(t *testing.T) {
 	}
 }
 
+// TestWebViewPictureInPicture passes PictureInPicture to a web view, whose
+// page moves its video into picture in picture.
+func TestWebViewPictureInPicture(t *testing.T) {
+	w, _, s := contentWindow(t, func(c *ui.Context) {})
+	v, err := w.NewWebView(WebViewOptions{Page: PageOptions{PictureInPicture: true}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if views := s.WebViews(); len(views) != 1 || !views[0].Opts.PictureInPicture {
+		t.Fatalf("web views %d: PictureInPicture not applied", len(views))
+	}
+	v.Page().TogglePictureInPicture()
+	if !v.Page().IsPictureInPictureActive() {
+		t.Error("TogglePictureInPicture did not reach the web view")
+	}
+}
+
+// TestPageGestures passes SwipeNavigation and PinchZoom to the backend for
+// a window's page and a web view's, both off unless asked for.
+func TestPageGestures(t *testing.T) {
+	gestures := PageOptions{SwipeNavigation: true, PinchZoom: true}
+	_, fw := testWindow(t, WindowOptions{})
+	if o := fw.Opts; o.SwipeNavigation || o.PinchZoom {
+		t.Errorf("a window's page swipes %v and pinches %v by default", o.SwipeNavigation, o.PinchZoom)
+	}
+	_, fw = testWindow(t, WindowOptions{Page: gestures})
+	if o := fw.Opts; !o.SwipeNavigation || !o.PinchZoom {
+		t.Errorf("a window's page asked to swipes %v and pinches %v", o.SwipeNavigation, o.PinchZoom)
+	}
+	_, fw = testWindow(t, WindowOptions{Page: PageOptions{PinchZoom: true}})
+	if o := fw.Opts; o.SwipeNavigation || !o.PinchZoom {
+		t.Errorf("a window's page asked to pinch swipes %v and pinches %v", o.SwipeNavigation, o.PinchZoom)
+	}
+
+	w, _, s := contentWindow(t, func(c *ui.Context) {})
+	if _, err := w.NewWebView(WebViewOptions{}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := w.NewWebView(WebViewOptions{Page: gestures}); err != nil {
+		t.Fatal(err)
+	}
+	views := s.WebViews()
+	if len(views) != 2 {
+		t.Fatalf("%d web views", len(views))
+	}
+	if o := views[0].Opts; o.SwipeNavigation || o.PinchZoom {
+		t.Errorf("a web view swipes %v and pinches %v by default", o.SwipeNavigation, o.PinchZoom)
+	}
+	if o := views[1].Opts; !o.SwipeNavigation || !o.PinchZoom {
+		t.Errorf("a web view asked to swipes %v and pinches %v", o.SwipeNavigation, o.PinchZoom)
+	}
+}
+
 func TestWebViewNeedsContent(t *testing.T) {
 	w, _ := testWindow(t, WindowOptions{})
 	if _, err := w.NewWebView(WebViewOptions{}); !errors.Is(err, errNoContent) {
@@ -210,6 +263,13 @@ func TestWebViewPage(t *testing.T) {
 	onMain(func() { fv.SetAudible(true) })
 	if !v.Page().IsAudible() || !slices.Equal(audible, []bool{true}) {
 		t.Errorf("a web view playing: IsAudible %v, changes %v", v.Page().IsAudible(), audible)
+	}
+	var muted []CaptureState
+	v.Page().OnCaptureStateChanged(func(_ CaptureKind, s CaptureState) { muted = append(muted, s) })
+	onMain(func() { fv.SetCapture(platform.CaptureMicrophone, platform.CaptureActive) })
+	v.Page().SetCaptureState(CaptureMicrophone, CaptureMuted)
+	if got := v.Page().CaptureState(CaptureMicrophone); got != CaptureMuted || !slices.Equal(muted, []CaptureState{CaptureActive, CaptureMuted}) {
+		t.Errorf("a web view's microphone muted: CaptureState %d, changes %v", got, muted)
 	}
 }
 

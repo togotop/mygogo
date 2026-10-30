@@ -19,6 +19,7 @@ import (
 
 // TestActivateMenuItem activates an item of a window's menu bar, found by
 // the labels along its path, e.g. TestActivateMenuItem(hwnd, "File", "New").
+// plugins/automation's menu request chooses items with it too.
 func TestActivateMenuItem(hwnd uintptr, path ...string) error {
 	w := theBackend.windows[hwnd]
 	if w == nil || w.menu == nil {
@@ -512,6 +513,43 @@ func popupLabels(h uintptr) []string {
 	return labels
 }
 
+// PopupItemWidth is how wide an item MyGo draws of a popup menu shows,
+// and how wide it needs to be for all it draws, in pixels.
+type PopupItemWidth struct {
+	Label        string
+	Shown, Needs int32
+}
+
+// TestPopupItemWidths returns the widths of the items MyGo draws of the
+// popup menus the main thread shows for a window, but separators: none
+// where Windows draws them (Windows 10). known is whether MyGo knows,
+// from items drawn, how much Windows widens them at the window's DPI.
+func TestPopupItemWidths(hwnd uintptr) (items []PopupItemWidth, known bool) {
+	getItemInfo := user32.NewProc("GetMenuItemInfoW")
+	getItemRect := user32.NewProc("GetMenuItemRect")
+	dpi := dpiOf(hwnd)
+	for _, h := range threadPopups() {
+		hmenu, _, _ := procSendMessageW.Call(h, mnGetHMenu, 0, 0)
+		n, _, _ := procGetMenuItemCount.Call(hmenu)
+		for i := range int(int32(n)) {
+			mi := menuItemInfo{Mask: miimData}
+			mi.Size = uint32(unsafe.Sizeof(mi))
+			getItemInfo.Call(hmenu, uintptr(i), 1, uintptr(unsafe.Pointer(&mi)))
+			l := theBackend.menus.looks[mi.ItemData]
+			if l == nil || l.separator {
+				continue
+			}
+			var r rect
+			if ok, _, _ := getItemRect.Call(0, hmenu, uintptr(i), uintptr(unsafe.Pointer(&r))); ok == 0 {
+				continue
+			}
+			items = append(items, PopupItemWidth{l.label, r.Right - r.Left, theBackend.itemWidth(l, dpi)})
+		}
+	}
+	_, known = theBackend.menuExtra[dpi]
+	return items, known
+}
+
 var (
 	procPrintWindow            = user32.NewProc("PrintWindow")
 	procGetPixel               = gdi32.NewProc("GetPixel")
@@ -651,6 +689,32 @@ func TestBrowserAcceleratorKeys(hwnd uintptr) (on, ok bool) {
 	return v != 0, true
 }
 
+// TestPageGestures reports whether a swipe navigates and a pinch zooms
+// the page of a window, or with webView 0 or more, of its web view of that
+// index, as its WebView2 settings say. ok is false without that page's web
+// view or a runtime with ICoreWebView2Settings6.
+func TestPageGestures(hwnd uintptr, webView int) (swipe, pinch, ok bool) {
+	w := theBackend.windows[hwnd]
+	if w != nil && webView >= 0 {
+		if webView >= len(w.webViews) {
+			return false, false, false
+		}
+		w = w.webViews[webView]
+	}
+	if w == nil || w.settings == 0 {
+		return false, false, false
+	}
+	s6 := queryInterface(w.settings, &iidICoreWebView2Settings6)
+	if s6 == 0 {
+		return false, false, false
+	}
+	defer release(s6)
+	var sw, pz int32
+	comCall(s6, set6GetIsSwipeNavigationEnabled, uintptr(unsafe.Pointer(&sw)))
+	comCall(s6, set5GetIsPinchZoomEnabled, uintptr(unsafe.Pointer(&pz)))
+	return sw != 0, pz != 0, true
+}
+
 // TestPinchSurface pinches a touchpad at (x, y), in DIPs, in a window
 // showing native UI, by scale, with the message Windows sends for it: the
 // wheel with Ctrl held, by less than a notch at a time. It reports the
@@ -780,4 +844,68 @@ func TestGDIObjects() int {
 	process, _ := syscall.GetCurrentProcess()
 	n, _, _ := user32.NewProc("GetGuiResources").Call(uintptr(process), grGDIObjects)
 	return int(n)
+}
+
+// TestRightClickPage right-clicks (x, y), in CSS pixels, in the page of a
+// window's web view, with the mouse events of the DevTools protocol, as a
+// mouse does. The page's context menu opens later. It reports false for a
+// window without a web view.
+func TestRightClickPage(hwnd uintptr, x, y float64) bool {
+	w := theBackend.windows[hwnd]
+	if w == nil || w.webview == 0 {
+		return false
+	}
+	for _, typ := range []string{"mousePressed", "mouseReleased"} {
+		w.devtools("Input.dispatchMouseEvent", fmt.Sprintf(`{"type":%q,"x":%g,"y":%g,"button":"right","buttons":2,"clickCount":1}`, typ, x, y), nil)
+	}
+	return true
+}
+
+// TestPageMenu returns the labels of the items of the popup menu the main
+// thread shows, without their mnemonics' ampersands, "-" for separators,
+// and false when it shows none: a page's context menu MyGo draws. The
+// menu WebView2 draws itself is not MyGo's to read.
+func TestPageMenu() ([]string, bool) {
+	popups := threadPopups()
+	if len(popups) == 0 {
+		return nil, false
+	}
+	labels := popupLabels(popups[0])
+	for i, l := range labels {
+		labels[i] = withoutAmpersands(l)
+	}
+	return labels, true
+}
+
+// TestChoosePageMenuItem chooses the item labeled label, without its
+// mnemonic's ampersand, of that menu, and reports whether it has one.
+func TestChoosePageMenuItem(label string) bool {
+	popups := threadPopups()
+	if len(popups) == 0 {
+		return false
+	}
+	for _, l := range popupLabels(popups[0]) {
+		if withoutAmpersands(l) == label {
+			return TestChoosePopupItem(l)
+		}
+	}
+	return false
+}
+
+// TestBackgroundThrottlingOff reports whether the page of a window, or of
+// its first web view, keeps running while it can't be seen: WebView2's
+// browser runs with unthrottledArguments, the one setting, which all
+// pages share.
+func TestBackgroundThrottlingOff(hwnd uintptr, webView bool) (off bool, settings int) {
+	w := theBackend.windows[hwnd]
+	if w != nil && webView {
+		if len(w.webViews) == 0 {
+			return false, 0
+		}
+		w = w.webViews[0]
+	}
+	if w == nil || w.controller == 0 {
+		return false, 0
+	}
+	return theBackend.envUnthrottled, 1
 }

@@ -59,8 +59,16 @@ var (
 
 	// caPass counts the passes of the main run loop, past Core Animation's
 	// commit of each: frames drawn in the same pass go into the same
-	// transaction.
+	// transaction. Only the passes after a frame are counted (armPass):
+	// a frame's pass is all updateLayer compares.
 	caPass uint64 = 1
+	// caPassArmed tells that an observer will count the end of this pass.
+	caPassArmed bool
+	// caPassCallout is the observer's callback, made once (purego callbacks
+	// are never freed), and observerCreate and addObserver what arms it.
+	caPassCallout  uintptr
+	observerCreate func(alloc uintptr, activities uint, repeats bool, order int, callout, ctx uintptr) uintptr
+	addObserver    func(rl, observer, mode uintptr)
 )
 
 const (
@@ -92,16 +100,39 @@ func loadSurface() {
 		name := **(**uintptr)(unsafe.Pointer(&p))
 		cgColorSpaceSRGB, _, _ = purego.SyscallN(mustDlsym(libCG, "CGColorSpaceCreateWithName"), name)
 		// An observer after Core Animation's counts the transactions it
-		// committed.
-		var observerCreate func(alloc uintptr, activities uint, repeats bool, order int, callout, ctx uintptr) uintptr
-		var addObserver func(rl, observer, mode uintptr)
+		// committed (armPass).
 		purego.RegisterLibFunc(&observerCreate, libCF, "CFRunLoopObserverCreate")
 		purego.RegisterLibFunc(&addObserver, libCF, "CFRunLoopAddObserver")
-		passed := purego.NewCallback(func(observer, activity, info uintptr) { caPass++ })
-		if o := observerCreate(0, cfRunLoopBeforeWaiting|cfRunLoopExit, true, caCommitOrder+1, passed, 0); o != 0 {
-			addObserver(cfRunLoopGetMain(), o, kCFRunLoopCommonModes)
-		}
+		caPassCallout = purego.NewCallback(func(observer, activity, info uintptr) {
+			caPass++
+			caPassArmed = false
+		})
 	})
+}
+
+// armPass has the end of this pass of the main run loop counted (caPass),
+// once: a frame drawn in it calls it.
+//
+// 🔴 The observer is not left on the run loop, and that is what keeps an idle
+// window idle. Its callout is Go, so every pass it sees enters Go from the
+// run loop: the main thread takes a P and wakes another thread, and sysmon
+// stays awake polling. AppKit's launch measurement wakes the main run loop
+// some 70 times a second for as long as an app runs, so a repeating
+// observer turned an idle window into 2,000 context switches a second, four
+// times a web view's, where a one-shot one armed by frames costs nothing
+// once they stop.
+func armPass() {
+	if caPassArmed || caPassCallout == 0 {
+		return
+	}
+	o := observerCreate(0, cfRunLoopBeforeWaiting|cfRunLoopExit, false, caCommitOrder+1, caPassCallout, 0)
+	if o == 0 {
+		return
+	}
+	addObserver(cfRunLoopGetMain(), o, kCFRunLoopCommonModes)
+	// The run loop holds it until it fires, and lets it go then.
+	cfRelease(o)
+	caPassArmed = true
 }
 
 type surface struct {
@@ -118,9 +149,13 @@ type surface struct {
 	linkRunning bool
 	due         bool
 	// deferred tells that the content left the last paced frame to draw
-	// later (FrameNow): the link keeps running meanwhile.
+	// later (FrameNow): the link keeps running meanwhile. soon tells that
+	// a frame waits for the backend's queue (drawSoon), and drawn that the
+	// content's first frame reached the surface (FirstFrame).
 	deferred  bool
 	timing    bool
+	soon      bool
+	drawn     bool
 	resized   bool
 	lastFrame time.Time
 	framePass uint64
@@ -224,12 +259,14 @@ func (s *surface) RequestFrame() {
 		switch {
 		case s.linkRunning:
 			s.due = true
-		case time.Since(s.lastFrame) > 2*s.refresh() && s.visible():
-			// After a pause, the frame draws at once, at the end of this
-			// pass of the run loop, as AppKit's views do. A window out of
-			// sight waits for the link, which ticks once it shows: AppKit
-			// draws the views of hidden windows too.
-			send(s.view, "setNeedsDisplay:", 1)
+		case time.Since(s.lastFrame) > 2*s.refresh() && (s.visible() || !s.drawn):
+			// After a pause, the frame draws at once, in this pass of the
+			// run loop (drawSoon). A window out of sight waits for the
+			// link, which ticks once it shows: AppKit draws the views of
+			// hidden windows too. The first frame draws at once all the
+			// same: the link does not tick for a window made hidden, which
+			// that frame makes ready to show (OnReadyToShow).
+			s.drawSoon()
 		default:
 			// Frames that follow each other draw at the display's
 			// refreshes; the link keeps running while they come, rather
@@ -246,13 +283,46 @@ func (s *surface) RequestFrame() {
 	// One refresh after the last frame, or at once after a pause.
 	delay := s.refresh() - time.Since(s.lastFrame)
 	if delay <= 0 {
-		send(s.view, "setNeedsDisplay:", 1)
+		s.drawSoon()
 		return
 	}
 	s.timing = true
 	withPool(func() {
 		t := msgTimer(class("NSTimer"), sel("timerWithTimeInterval:target:selector:userInfo:repeats:"), delay.Seconds(), s.view, sel("mygoTimer:"), 0, false)
 		send(send(class("NSRunLoop"), "mainRunLoop"), "addTimer:forMode:", uintptr(t), kCFRunLoopCommonModes)
+	})
+}
+
+// FirstFrame tells that the content's first frame reached the surface
+// (platform.FirstFrameSurface).
+func (s *surface) FirstFrame() { s.drawn = true }
+
+var _ platform.FirstFrameSurface = (*surface)(nil)
+
+// drawSoon draws a frame in this pass of the run loop, from the backend's
+// queue, before Core Animation commits the pass's transaction, rather than
+// when AppKit displays the view: AppKit displays views in a run loop
+// observer, committing the transaction, and a frame drawn there runs the
+// app's code, as a button's Clicked, inside it. CFRunLoop runs no observer
+// again while it is in it, so a modal panel or sheet the code shows, and
+// waits for (Dialog.Open), runs a run loop of its own in which AppKit
+// displays nothing and Core Animation commits nothing: the panel never
+// shows, and runModal gives up, or the sheet never ends (#883). Only
+// frames AppKit asks for, as a resize's, which must draw with the
+// window's change, draw there (updateLayer).
+func (s *surface) drawSoon() {
+	if s.soon {
+		return
+	}
+	s.soon = true
+	last := s.lastFrame
+	s.w.b.post(func() {
+		s.soon = false
+		// A frame drawn since, as a resize's, drew what this one would.
+		if s.w.b.surfaceOf(s.view) != s || s.lastFrame != last {
+			return
+		}
+		s.frameNow(false)
 	})
 }
 
@@ -295,6 +365,7 @@ func (s *surface) FrameNow() {
 func (s *surface) frameNow(paced bool) {
 	s.resized = false
 	s.framePass = caPass
+	armPass()
 	s.lastFrame = time.Now()
 	s.deferred = s.send(platform.SurfaceEvent{Kind: platform.SurfaceFrame, Paced: paced}) && paced
 }
@@ -842,7 +913,7 @@ func registerSurfaceClass() {
 			// A closed window's view lives until its timer fires.
 			if s := b().surfaceOf(self); s != nil {
 				s.timing = false
-				send(self, "setNeedsDisplay:", 1)
+				s.frameNow(false)
 			}
 		}),
 		method("setFrameSize:", func(self id, cmd objc.SEL, size NSSize) {
