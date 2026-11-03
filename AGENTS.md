@@ -78,6 +78,7 @@ go run ./cmd/mygo dev -platform ios examples/todo        # on the booted iOS sim
 go run ./cmd/mygo dev -platform android examples/todo    # on the device or emulator adb reaches (SDK + NDK)
 go run ./cmd/mygo build -platform ios/simulator examples/counter-native   # an .app for the simulator (ios: a signed .ipa)
 go run ./cmd/mygo build -platform android examples/counter-native         # an .apk and an .aab
+bash scripts/android-smoke.sh                      # the example on the device adb reaches: build, install, walk its plugins
 go generate ./internal/mobile/wire          # the messages of phones' backend and hosts: Go, Swift, Kotlin
 go run ./cmd/mygo dev -platform ios examples/mobile      # phones' gestures, widgets, plugins (ui/mobile)
 go run ./examples/gallery                  # the native UI toolkit's tour

@@ -475,6 +475,16 @@ func (a *app) system(c *ui.Context) {
 					}
 					return fmt.Sprintf("%d%% (ringer %s)", v.Percent, v.Ringer)
 				})
+				row("Raise the volume", func(ctx context.Context) string {
+					if err := media.Adjust(ctx, 1); err != nil {
+						return err.Error()
+					}
+					v, err := media.Current(ctx)
+					if err != nil {
+						return err.Error()
+					}
+					return fmt.Sprintf("%d%% (ringer %s)", v.Percent, v.Ringer)
+				})
 				row("Ask for silent", func(ctx context.Context) string {
 					err := media.SetRinger(ctx, media.RingerSilent)
 					switch {
