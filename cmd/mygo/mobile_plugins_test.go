@@ -226,3 +226,20 @@ func TestMobilePluginResources(t *testing.T) {
 		t.Error("a resources directory that is not there is an error")
 	}
 }
+
+// A plugin reaches the system's services through the manifest's own
+// fragments, as <queries> for a text-to-speech engine, which the app's
+// manifest takes beside <application>.
+func TestMobilePluginManifest(t *testing.T) {
+	ps := mobilePlugins{
+		{ID: "speech", Android: &pluginAndroid{Class: "SpeechPlugin", Manifest: []string{`<queries><intent><action android:name="android.intent.action.TTS_SERVICE" /></intent></queries>`}}},
+		{ID: "other", Android: &pluginAndroid{Class: "OtherPlugin"}},
+	}
+	got := ps.manifestRoot()
+	if len(got) != 1 || !strings.Contains(got[0], "TTS_SERVICE") {
+		t.Fatalf("manifest fragments: %v", got)
+	}
+	if ps.manifestApplication() != nil {
+		t.Errorf("application fragments: %v", ps.manifestApplication())
+	}
+}

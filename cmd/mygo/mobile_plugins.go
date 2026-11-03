@@ -69,6 +69,9 @@ type pluginAndroid struct {
 	// Resources are directories of res/ files the plugin brings: layouts,
 	// drawables, XML, whose paths under them are kept.
 	Resources []string `json:"resources"`
+	// Manifest are XML fragments the manifest itself takes, beside
+	// <application>: <queries>, for the services a plugin reaches.
+	Manifest []string `json:"manifest"`
 }
 
 // mobilePlugins are the plugins of an app, in the order of their ids.
@@ -389,6 +392,18 @@ func (ps mobilePlugins) dependencies() []string {
 					out = append(out, d)
 				}
 			}
+		}
+	}
+	return out
+}
+
+// manifestRoot are the fragments the manifest takes beside <application>,
+// such as the <queries> a plugin reaches the system's services through.
+func (ps mobilePlugins) manifestRoot() []string {
+	var out []string
+	for _, p := range ps {
+		if p.Android != nil {
+			out = append(out, p.Android.Manifest...)
 		}
 	}
 	return out
