@@ -1,0 +1,14 @@
+{
+  "mobile": {
+    "id": "speech",
+    "android": {
+      "sources": [
+        "android/*.kt"
+      ],
+      "class": "SpeechPlugin",
+      "manifest": [
+        "<queries><intent><action android:name=\"android.intent.action.TTS_SERVICE\" /></intent></queries>"
+      ]
+    }
+  }
+}
