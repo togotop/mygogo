@@ -65,12 +65,16 @@ type Application struct {
 	onMemoryWarning   listeners[func()]
 	saveState         func() []byte
 	keepingState      bool
-	onActivate        listeners[func(bool)]
-	onDidBecomeActive listeners[func()]
-	onDidResignActive listeners[func()]
-	onOpenURL         listeners[func(string)]
-	onOpenFile        listeners[func(string)]
-	onWindowCreated   listeners[func(*Window)]
+	// lifecycle is the latest LifecycleState, and its listeners hear it
+	// change.
+	lifecycle          LifecycleState
+	onLifecycleChanged listeners[func(LifecycleState)]
+	onActivate         listeners[func(bool)]
+	onDidBecomeActive  listeners[func()]
+	onDidResignActive  listeners[func()]
+	onOpenURL          listeners[func(string)]
+	onOpenFile         listeners[func(string)]
+	onWindowCreated    listeners[func(*Window)]
 
 	onNotificationClick listeners[func(string)]
 }
@@ -656,7 +660,12 @@ func (d *Dock) Show() { App.SetActivationPolicy(ActivationPolicyRegular) }
 // appHandler receives application events from the backend.
 type appHandler struct{}
 
-func (appHandler) Ready()    { App.handleReady() }
+func (appHandler) Ready() {
+	App.handleReady()
+	// A launched application is the one the user works in, until the
+	// system says otherwise.
+	App.setLifecycle(LifecycleActive)
+}
 func (appHandler) Dispatch() { loop.drain() }
 func (appHandler) QuitRequested() bool {
 	if App.stopping {
@@ -674,8 +683,14 @@ func (appHandler) Terminating() { App.finish() }
 func (appHandler) Activated(visible bool) {
 	fire1(&App.onActivate, visible)
 }
-func (appHandler) DidBecomeActive() { fire(&App.onDidBecomeActive) }
-func (appHandler) DidResignActive() { fire(&App.onDidResignActive) }
+func (appHandler) DidBecomeActive() {
+	App.setLifecycle(LifecycleActive)
+	fire(&App.onDidBecomeActive)
+}
+func (appHandler) DidResignActive() {
+	App.setLifecycle(LifecycleInactive)
+	fire(&App.onDidResignActive)
+}
 func (appHandler) OpenURLs(urls []string) {
 	for _, u := range urls {
 		fire1(&App.onOpenURL, u)
