@@ -34,6 +34,7 @@ var calls = []msg{
 		f("IncreaseContrast", "bool"), f("TextScale", "float"),
 	}},
 	{name: "SetAppearance", doc: `the appearance the app asks for: "light", "dark" or "system"`, args: []field{f("Source", "string")}},
+	{name: "MulticastLock", doc: "the Wi-Fi multicast lock the local network's discovery holds, or gives back", args: []field{f("On", "bool")}},
 	{name: "Screen", doc: "the screen's size in DIPs and scale", wait: true, reply: []field{
 		f("Width", "float"), f("Height", "float"), f("Scale", "float"),
 	}},

@@ -8,85 +8,86 @@ const (
 	CallTimeZone               = 2
 	CallTheme                  = 3
 	CallSetAppearance          = 4
-	CallScreen                 = 5
-	CallLog                    = 6
-	CallCreateWindow           = 7
-	CallFirstFrame             = 8
-	CallPlaceViews             = 9
-	CallShowWindow             = 10
-	CallHideWindow             = 11
-	CallCloseWindow            = 12
-	CallSetBackground          = 13
-	CallFocus                  = 14
-	CallSetTitle               = 15
-	CallCreateTabs             = 16
-	CallAddTab                 = 17
-	CallShowTabs               = 18
-	CallSelectTab              = 19
-	CallSetTabBadge            = 20
-	CallCloseTabs              = 21
-	CallPushWindow             = 22
-	CallPopWindow              = 23
-	CallLoadURL                = 24
-	CallLoadHTML               = 25
-	CallReload                 = 26
-	CallStopLoading            = 27
-	CallGoBack                 = 28
-	CallGoForward              = 29
-	CallEval                   = 30
-	CallCallAsync              = 31
-	CallSetZoom                = 32
-	CallSetUserAgent           = 33
-	CallSetUserScripts         = 34
-	CallCapturePage            = 35
-	CallUserAgent              = 36
-	CallSchemeRespond          = 37
-	CallSchemeData             = 38
-	CallSchemeFinish           = 39
-	CallSchemeFail             = 40
-	CallMessageBox             = 41
-	CallOpenFiles              = 42
-	CallShareFile              = 43
-	CallClipboardText          = 44
-	CallSetClipboardText       = 45
-	CallOpenURL                = 46
-	CallSecretGet              = 47
-	CallSecretSet              = 48
-	CallSecretDelete           = 49
-	CallNotify                 = 50
-	CallRemoveNotification     = 51
-	CallRemoveAllNotifications = 52
-	CallKeepAwake              = 53
-	CallNetworkStatus          = 54
-	CallWatchNetwork           = 55
-	CallBattery                = 56
-	CallSetSystemBars          = 57
-	CallSetOrientations        = 58
-	CallShare                  = 59
-	CallSaveFile               = 60
-	CallClipboardImage         = 61
-	CallSetClipboardImage      = 62
-	CallPopupMenu              = 63
-	CallSetBarItems            = 64
-	CallPluginCall             = 65
-	CallAudioOpen              = 66
-	CallAudioWrite             = 67
-	CallAudioClose             = 68
-	CallHaptic                 = 69
-	CallRequestFrame           = 70
-	CallSetTextInput           = 71
-	CallSetCursor              = 72
-	CallAccessibilityChanged   = 73
-	CallAnnounce               = 74
-	CallShowMenu               = 75
-	CallSetBackAvailable       = 76
-	CallShowMagnifier          = 77
-	CallHideMagnifier          = 78
-	CallTextMetrics            = 79
-	CallMeasureText            = 80
-	CallTextAdvances           = 81
-	CallDrawText               = 82
-	CallRegisterFont           = 83
+	CallMulticastLock          = 5
+	CallScreen                 = 6
+	CallLog                    = 7
+	CallCreateWindow           = 8
+	CallFirstFrame             = 9
+	CallPlaceViews             = 10
+	CallShowWindow             = 11
+	CallHideWindow             = 12
+	CallCloseWindow            = 13
+	CallSetBackground          = 14
+	CallFocus                  = 15
+	CallSetTitle               = 16
+	CallCreateTabs             = 17
+	CallAddTab                 = 18
+	CallShowTabs               = 19
+	CallSelectTab              = 20
+	CallSetTabBadge            = 21
+	CallCloseTabs              = 22
+	CallPushWindow             = 23
+	CallPopWindow              = 24
+	CallLoadURL                = 25
+	CallLoadHTML               = 26
+	CallReload                 = 27
+	CallStopLoading            = 28
+	CallGoBack                 = 29
+	CallGoForward              = 30
+	CallEval                   = 31
+	CallCallAsync              = 32
+	CallSetZoom                = 33
+	CallSetUserAgent           = 34
+	CallSetUserScripts         = 35
+	CallCapturePage            = 36
+	CallUserAgent              = 37
+	CallSchemeRespond          = 38
+	CallSchemeData             = 39
+	CallSchemeFinish           = 40
+	CallSchemeFail             = 41
+	CallMessageBox             = 42
+	CallOpenFiles              = 43
+	CallShareFile              = 44
+	CallClipboardText          = 45
+	CallSetClipboardText       = 46
+	CallOpenURL                = 47
+	CallSecretGet              = 48
+	CallSecretSet              = 49
+	CallSecretDelete           = 50
+	CallNotify                 = 51
+	CallRemoveNotification     = 52
+	CallRemoveAllNotifications = 53
+	CallKeepAwake              = 54
+	CallNetworkStatus          = 55
+	CallWatchNetwork           = 56
+	CallBattery                = 57
+	CallSetSystemBars          = 58
+	CallSetOrientations        = 59
+	CallShare                  = 60
+	CallSaveFile               = 61
+	CallClipboardImage         = 62
+	CallSetClipboardImage      = 63
+	CallPopupMenu              = 64
+	CallSetBarItems            = 65
+	CallPluginCall             = 66
+	CallAudioOpen              = 67
+	CallAudioWrite             = 68
+	CallAudioClose             = 69
+	CallHaptic                 = 70
+	CallRequestFrame           = 71
+	CallSetTextInput           = 72
+	CallSetCursor              = 73
+	CallAccessibilityChanged   = 74
+	CallAnnounce               = 75
+	CallShowMenu               = 76
+	CallSetBackAvailable       = 77
+	CallShowMagnifier          = 78
+	CallHideMagnifier          = 79
+	CallTextMetrics            = 80
+	CallMeasureText            = 81
+	CallTextAdvances           = 82
+	CallDrawText               = 83
+	CallRegisterFont           = 84
 )
 
 // Numbers of events.
@@ -265,6 +266,19 @@ func (m *SetAppearance) Encode(w *Writer) {
 
 // Wait reports whether the caller waits for the host to run it.
 func (*SetAppearance) Wait() bool { return false }
+
+// MulticastLock is the Wi-Fi multicast lock the local network's discovery holds, or gives back.
+type MulticastLock struct {
+	On bool
+}
+
+func (m *MulticastLock) Encode(w *Writer) {
+	w.Uvarint(CallMulticastLock)
+	w.Bool(m.On)
+}
+
+// Wait reports whether the caller waits for the host to run it.
+func (*MulticastLock) Wait() bool { return false }
 
 // Screen is the screen's size in DIPs and scale.
 type Screen struct {

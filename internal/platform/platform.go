@@ -1201,6 +1201,16 @@ type Network interface {
 	Status() NetworkStatus
 }
 
+// MulticastLocker is the Wi-Fi multicast lock a phone needs to hear what the
+// local network announces: a phone's Wi-Fi filters multicast packets unless
+// the app holds the lock. It is what local network discovery takes, and the
+// counter of holders is the caller's: it asks once per take, and gives back
+// once per give. Platforms without such a lock don't implement it.
+type MulticastLocker interface {
+	// MulticastLock holds the lock while on, and gives it back while not.
+	MulticastLock(on bool)
+}
+
 // ErrSecretNotFound is what Secrets.Secret fails with when the store has
 // no secret for the service and account.
 var ErrSecretNotFound = errors.New("mygo: secret not found")

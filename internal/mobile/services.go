@@ -310,3 +310,7 @@ func (s secrets) DeleteSecret(service, account string) error {
 	s.b.call(&wire.SecretDelete{Service: service, Account: account}, &r)
 	return errorOf(r.Error)
 }
+
+// MulticastLock asks the host for the Wi-Fi multicast lock, or gives it back:
+// a phone filters what the local network announces unless the app holds it.
+func (b *Backend) MulticastLock(on bool) { b.call(&wire.MulticastLock{On: on}, nil) }

@@ -90,6 +90,9 @@ final class Host: NSObject, HostCalls, UNUserNotificationCenterDelegate, UIDocum
         window?.overrideUserInterfaceStyle = style
     }
 
+    /// iOS hears multicast without a lock of its own.
+    func multicastLock(_ c: MulticastLockCall) {}
+
     func screen() -> ScreenReply {
         var r = ScreenReply()
         let s = window?.windowScene?.screen ?? UIScreen.main

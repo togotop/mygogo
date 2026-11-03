@@ -160,6 +160,14 @@ class SetAppearanceCall(
     }
 }
 
+class MulticastLockCall(
+    @JvmField var on: Boolean = false,
+) {
+    constructor(r: WireReader) : this() {
+        on = r.bool()
+    }
+}
+
 class ScreenReply(
     @JvmField var width: Double = 0.0,
     @JvmField var height: Double = 0.0,
@@ -1201,6 +1209,8 @@ interface HostCalls {
     fun theme(): ThemeReply
     /** the appearance the app asks for: "light", "dark" or "system" */
     fun setAppearance(c: SetAppearanceCall)
+    /** the Wi-Fi multicast lock the local network's discovery holds, or gives back */
+    fun multicastLock(c: MulticastLockCall)
     /** the screen's size in DIPs and scale */
     fun screen(): ScreenReply
     /** a line the app wrote to its standard output or error */
@@ -1331,85 +1341,86 @@ fun dispatchCall(h: HostCalls, buf: ByteArray): ByteArray? {
         2 -> { h.timeZone().encode(w); return w.toByteArray() }
         3 -> { h.theme().encode(w); return w.toByteArray() }
         4 -> h.setAppearance(SetAppearanceCall(r))
-        5 -> { h.screen().encode(w); return w.toByteArray() }
-        6 -> h.log(LogCall(r))
-        7 -> { h.createWindow(CreateWindowCall(r)).encode(w); return w.toByteArray() }
-        8 -> h.firstFrame(FirstFrameCall(r))
-        9 -> h.placeViews(PlaceViewsCall(r))
-        10 -> h.showWindow(ShowWindowCall(r))
-        11 -> h.hideWindow(HideWindowCall(r))
-        12 -> h.closeWindow(CloseWindowCall(r))
-        13 -> h.setBackground(SetBackgroundCall(r))
-        14 -> h.focus(FocusCall(r))
-        15 -> h.setTitle(SetTitleCall(r))
-        16 -> h.createTabs(CreateTabsCall(r))
-        17 -> h.addTab(AddTabCall(r))
-        18 -> h.showTabs(ShowTabsCall(r))
-        19 -> h.selectTab(SelectTabCall(r))
-        20 -> h.setTabBadge(SetTabBadgeCall(r))
-        21 -> h.closeTabs(CloseTabsCall(r))
-        22 -> h.pushWindow(PushWindowCall(r))
-        23 -> h.popWindow(PopWindowCall(r))
-        24 -> h.loadURL(LoadURLCall(r))
-        25 -> h.loadHTML(LoadHTMLCall(r))
-        26 -> h.reload(ReloadCall(r))
-        27 -> h.stopLoading(StopLoadingCall(r))
-        28 -> h.goBack(GoBackCall(r))
-        29 -> h.goForward(GoForwardCall(r))
-        30 -> h.eval(EvalCall(r))
-        31 -> h.callAsync(CallAsyncCall(r))
-        32 -> h.setZoom(SetZoomCall(r))
-        33 -> h.setUserAgent(SetUserAgentCall(r))
-        34 -> h.setUserScripts(SetUserScriptsCall(r))
-        35 -> h.capturePage(CapturePageCall(r))
-        36 -> { h.userAgent(UserAgentCall(r)).encode(w); return w.toByteArray() }
-        37 -> h.schemeRespond(SchemeRespondCall(r))
-        38 -> h.schemeData(SchemeDataCall(r))
-        39 -> h.schemeFinish(SchemeFinishCall(r))
-        40 -> h.schemeFail(SchemeFailCall(r))
-        41 -> h.messageBox(MessageBoxCall(r))
-        42 -> h.openFiles(OpenFilesCall(r))
-        43 -> h.shareFile(ShareFileCall(r))
-        44 -> { h.clipboardText().encode(w); return w.toByteArray() }
-        45 -> h.setClipboardText(SetClipboardTextCall(r))
-        46 -> { h.openURL(OpenURLCall(r)).encode(w); return w.toByteArray() }
-        47 -> { h.secretGet(SecretGetCall(r)).encode(w); return w.toByteArray() }
-        48 -> { h.secretSet(SecretSetCall(r)).encode(w); return w.toByteArray() }
-        49 -> { h.secretDelete(SecretDeleteCall(r)).encode(w); return w.toByteArray() }
-        50 -> h.notify(NotifyCall(r))
-        51 -> h.removeNotification(RemoveNotificationCall(r))
-        52 -> h.removeAllNotifications()
-        53 -> h.keepAwake(KeepAwakeCall(r))
-        54 -> { h.networkStatus().encode(w); return w.toByteArray() }
-        55 -> h.watchNetwork()
-        56 -> { h.battery().encode(w); return w.toByteArray() }
-        57 -> h.setSystemBars(SetSystemBarsCall(r))
-        58 -> h.setOrientations(SetOrientationsCall(r))
-        59 -> h.share(ShareCall(r))
-        60 -> h.saveFile(SaveFileCall(r))
-        61 -> { h.clipboardImage().encode(w); return w.toByteArray() }
-        62 -> h.setClipboardImage(SetClipboardImageCall(r))
-        63 -> h.popupMenu(PopupMenuCall(r))
-        64 -> h.setBarItems(SetBarItemsCall(r))
-        65 -> h.pluginCall(PluginCallCall(r))
-        66 -> { h.audioOpen(AudioOpenCall(r)).encode(w); return w.toByteArray() }
-        67 -> { h.audioWrite(AudioWriteCall(r)).encode(w); return w.toByteArray() }
-        68 -> { h.audioClose().encode(w); return w.toByteArray() }
-        69 -> h.haptic(HapticCall(r))
-        70 -> h.requestFrame(RequestFrameCall(r))
-        71 -> h.setTextInput(SetTextInputCall(r))
-        72 -> h.setCursor(SetCursorCall(r))
-        73 -> h.accessibilityChanged(AccessibilityChangedCall(r))
-        74 -> h.announce(AnnounceCall(r))
-        75 -> h.showMenu(ShowMenuCall(r))
-        76 -> h.setBackAvailable(SetBackAvailableCall(r))
-        77 -> h.showMagnifier(ShowMagnifierCall(r))
-        78 -> h.hideMagnifier(HideMagnifierCall(r))
-        79 -> { h.textMetrics(TextMetricsCall(r)).encode(w); return w.toByteArray() }
-        80 -> { h.measureText(MeasureTextCall(r)).encode(w); return w.toByteArray() }
-        81 -> { h.textAdvances(TextAdvancesCall(r)).encode(w); return w.toByteArray() }
-        82 -> { h.drawText(DrawTextCall(r)).encode(w); return w.toByteArray() }
-        83 -> { h.registerFont(RegisterFontCall(r)).encode(w); return w.toByteArray() }
+        5 -> h.multicastLock(MulticastLockCall(r))
+        6 -> { h.screen().encode(w); return w.toByteArray() }
+        7 -> h.log(LogCall(r))
+        8 -> { h.createWindow(CreateWindowCall(r)).encode(w); return w.toByteArray() }
+        9 -> h.firstFrame(FirstFrameCall(r))
+        10 -> h.placeViews(PlaceViewsCall(r))
+        11 -> h.showWindow(ShowWindowCall(r))
+        12 -> h.hideWindow(HideWindowCall(r))
+        13 -> h.closeWindow(CloseWindowCall(r))
+        14 -> h.setBackground(SetBackgroundCall(r))
+        15 -> h.focus(FocusCall(r))
+        16 -> h.setTitle(SetTitleCall(r))
+        17 -> h.createTabs(CreateTabsCall(r))
+        18 -> h.addTab(AddTabCall(r))
+        19 -> h.showTabs(ShowTabsCall(r))
+        20 -> h.selectTab(SelectTabCall(r))
+        21 -> h.setTabBadge(SetTabBadgeCall(r))
+        22 -> h.closeTabs(CloseTabsCall(r))
+        23 -> h.pushWindow(PushWindowCall(r))
+        24 -> h.popWindow(PopWindowCall(r))
+        25 -> h.loadURL(LoadURLCall(r))
+        26 -> h.loadHTML(LoadHTMLCall(r))
+        27 -> h.reload(ReloadCall(r))
+        28 -> h.stopLoading(StopLoadingCall(r))
+        29 -> h.goBack(GoBackCall(r))
+        30 -> h.goForward(GoForwardCall(r))
+        31 -> h.eval(EvalCall(r))
+        32 -> h.callAsync(CallAsyncCall(r))
+        33 -> h.setZoom(SetZoomCall(r))
+        34 -> h.setUserAgent(SetUserAgentCall(r))
+        35 -> h.setUserScripts(SetUserScriptsCall(r))
+        36 -> h.capturePage(CapturePageCall(r))
+        37 -> { h.userAgent(UserAgentCall(r)).encode(w); return w.toByteArray() }
+        38 -> h.schemeRespond(SchemeRespondCall(r))
+        39 -> h.schemeData(SchemeDataCall(r))
+        40 -> h.schemeFinish(SchemeFinishCall(r))
+        41 -> h.schemeFail(SchemeFailCall(r))
+        42 -> h.messageBox(MessageBoxCall(r))
+        43 -> h.openFiles(OpenFilesCall(r))
+        44 -> h.shareFile(ShareFileCall(r))
+        45 -> { h.clipboardText().encode(w); return w.toByteArray() }
+        46 -> h.setClipboardText(SetClipboardTextCall(r))
+        47 -> { h.openURL(OpenURLCall(r)).encode(w); return w.toByteArray() }
+        48 -> { h.secretGet(SecretGetCall(r)).encode(w); return w.toByteArray() }
+        49 -> { h.secretSet(SecretSetCall(r)).encode(w); return w.toByteArray() }
+        50 -> { h.secretDelete(SecretDeleteCall(r)).encode(w); return w.toByteArray() }
+        51 -> h.notify(NotifyCall(r))
+        52 -> h.removeNotification(RemoveNotificationCall(r))
+        53 -> h.removeAllNotifications()
+        54 -> h.keepAwake(KeepAwakeCall(r))
+        55 -> { h.networkStatus().encode(w); return w.toByteArray() }
+        56 -> h.watchNetwork()
+        57 -> { h.battery().encode(w); return w.toByteArray() }
+        58 -> h.setSystemBars(SetSystemBarsCall(r))
+        59 -> h.setOrientations(SetOrientationsCall(r))
+        60 -> h.share(ShareCall(r))
+        61 -> h.saveFile(SaveFileCall(r))
+        62 -> { h.clipboardImage().encode(w); return w.toByteArray() }
+        63 -> h.setClipboardImage(SetClipboardImageCall(r))
+        64 -> h.popupMenu(PopupMenuCall(r))
+        65 -> h.setBarItems(SetBarItemsCall(r))
+        66 -> h.pluginCall(PluginCallCall(r))
+        67 -> { h.audioOpen(AudioOpenCall(r)).encode(w); return w.toByteArray() }
+        68 -> { h.audioWrite(AudioWriteCall(r)).encode(w); return w.toByteArray() }
+        69 -> { h.audioClose().encode(w); return w.toByteArray() }
+        70 -> h.haptic(HapticCall(r))
+        71 -> h.requestFrame(RequestFrameCall(r))
+        72 -> h.setTextInput(SetTextInputCall(r))
+        73 -> h.setCursor(SetCursorCall(r))
+        74 -> h.accessibilityChanged(AccessibilityChangedCall(r))
+        75 -> h.announce(AnnounceCall(r))
+        76 -> h.showMenu(ShowMenuCall(r))
+        77 -> h.setBackAvailable(SetBackAvailableCall(r))
+        78 -> h.showMagnifier(ShowMagnifierCall(r))
+        79 -> h.hideMagnifier(HideMagnifierCall(r))
+        80 -> { h.textMetrics(TextMetricsCall(r)).encode(w); return w.toByteArray() }
+        81 -> { h.measureText(MeasureTextCall(r)).encode(w); return w.toByteArray() }
+        82 -> { h.textAdvances(TextAdvancesCall(r)).encode(w); return w.toByteArray() }
+        83 -> { h.drawText(DrawTextCall(r)).encode(w); return w.toByteArray() }
+        84 -> { h.registerFont(RegisterFontCall(r)).encode(w); return w.toByteArray() }
     }
     return null
 }

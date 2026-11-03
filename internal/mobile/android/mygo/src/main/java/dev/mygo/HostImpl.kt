@@ -14,6 +14,7 @@ import android.content.ClipboardManager
 import android.content.Context
 import android.content.Intent
 import android.content.MutableContextWrapper
+import android.net.wifi.WifiManager
 import android.content.pm.ActivityInfo
 import android.content.pm.PackageManager
 import android.content.res.Configuration
@@ -58,6 +59,9 @@ object HostImpl : HostCalls {
         private set
     val windows = HashMap<Long, HostWindow>()
     private var started = false
+
+    /** The Wi-Fi multicast lock the local network's discovery holds. */
+    private var multicastLock: WifiManager.MulticastLock? = null
     /** Whether Android made the Activity again after ending the process. */
     var restoring = false
 
@@ -257,6 +261,21 @@ object HostImpl : HostCalls {
                 else -> UiModeManager.MODE_NIGHT_AUTO
             }
         )
+    }
+
+    override fun multicastLock(c: MulticastLockCall) {
+        val wm = app.getSystemService(Context.WIFI_SERVICE) as? WifiManager ?: return
+        if (c.on) {
+            if (multicastLock == null) {
+                multicastLock = wm.createMulticastLock("mygo").apply {
+                    setReferenceCounted(false)
+                    acquire()
+                }
+            }
+        } else {
+            multicastLock?.let { runCatching { it.release() } }
+            multicastLock = null
+        }
     }
 
     override fun screen(): ScreenReply {

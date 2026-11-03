@@ -52,6 +52,8 @@ func (m *SSDPModule) Search(service string, timeout time.Duration, found func(SS
 	if timeout <= 0 {
 		timeout = 3 * time.Second
 	}
+	acquireMulticast()
+	defer releaseMulticast()
 	ctx, cancel := context.WithTimeout(context.Background(), timeout)
 	defer cancel()
 	return ssdp.Search(ctx, service, func(d ssdp.Device) {

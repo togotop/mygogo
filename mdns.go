@@ -44,6 +44,7 @@ func (m *MDNSModule) Browse(serviceType string, found func(MDNSService)) (cancel
 	if err != nil {
 		return nil, err
 	}
+	acquireMulticast()
 	ctx, stopQueries := context.WithCancel(context.Background())
 	inner, err := engine.Browse(ctx, serviceType, func(s mdns.Service) {
 		found(MDNSService{
@@ -57,6 +58,7 @@ func (m *MDNSModule) Browse(serviceType string, found func(MDNSService)) (cancel
 	})
 	if err != nil {
 		stopQueries()
+		releaseMulticast()
 		return nil, err
 	}
 	var once sync.Once
@@ -64,6 +66,7 @@ func (m *MDNSModule) Browse(serviceType string, found func(MDNSService)) (cancel
 		once.Do(func() {
 			stopQueries()
 			inner()
+			releaseMulticast()
 		})
 	}, nil
 }
@@ -76,6 +79,7 @@ func (m *MDNSModule) Advertise(svc MDNSService) (stop func(), err error) {
 	if err != nil {
 		return nil, err
 	}
+	acquireMulticast()
 	inner, err := engine.Advertise(mdns.Service{
 		Instance: svc.Instance,
 		Type:     svc.Type,
@@ -85,12 +89,14 @@ func (m *MDNSModule) Advertise(svc MDNSService) (stop func(), err error) {
 		TXT:      svc.TXT,
 	})
 	if err != nil {
+		releaseMulticast()
 		return nil, err
 	}
 	var once sync.Once
 	return func() {
 		once.Do(func() {
 			inner()
+			releaseMulticast()
 		})
 	}, nil
 }

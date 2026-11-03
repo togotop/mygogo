@@ -1,4 +1,6 @@
 <manifest xmlns:android="http://schemas.android.com/apk/res/android">
+    <!-- The Wi-Fi multicast lock the local network's discovery holds. -->
+    <uses-permission android:name="android.permission.CHANGE_WIFI_MULTICAST_STATE" />
     <application>
         <!-- The files the app shares (Shell.OpenPath). -->
         <provider
