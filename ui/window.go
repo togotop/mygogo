@@ -4,6 +4,7 @@ import (
 	"log"
 	"os"
 	"slices"
+	"sync"
 	"time"
 
 	"github.com/egoist/mygo/i18n"
@@ -19,6 +20,10 @@ import (
 // mygo.WindowOptions.Content. Create it with View.
 type Content struct {
 	view func(*context)
+	// mu guards hosts, the windows this content is attached to, for what an
+	// app asks of one of them.
+	mu    sync.Mutex
+	hosts map[*surface.Conn]*windowHost
 }
 
 // View returns the content of a window whose user interface view builds,
@@ -74,7 +79,13 @@ func FontFamilies() []FontFamily {
 
 // AttachContent connects the content to a window; package mygo calls it.
 func (v *Content) AttachContent(conn *surface.Conn) {
-	h := &windowHost{conn: conn}
+	h := &windowHost{conn: conn, content: v}
+	v.mu.Lock()
+	if v.hosts == nil {
+		v.hosts = map[*surface.Conn]*windowHost{}
+	}
+	v.hosts[conn] = h
+	v.mu.Unlock()
 	rt := newRuntime(v.view, h)
 	h.rt = rt
 	conn.Event = h.event
@@ -109,12 +120,26 @@ func (v *Content) AttachContent(conn *surface.Conn) {
 	h.requestFrame()
 }
 
+// ClearFocus takes the keyboard from what has it in the window of conn, as a
+// press on nothing does: the field stops editing, and an on-screen keyboard
+// hides. Package mygo calls it for Window.ClearFocus.
+func (v *Content) ClearFocus(conn *surface.Conn) {
+	v.mu.Lock()
+	h := v.hosts[conn]
+	v.mu.Unlock()
+	if h != nil && h.rt != nil {
+		h.rt.clearFocus()
+	}
+}
+
 // windowHost presents frames on a window's surface, with a GPU renderer
 // when the platform has one and in memory otherwise.
 type windowHost struct {
 	conn *surface.Conn
-	rt   *engine
-	gpu  gpuRenderer
+	// content is the one this host draws, which forgets the host as it goes.
+	content *Content
+	rt      *engine
+	gpu     gpuRenderer
 	// gpuTried tells that the first frame tried the GPU, onGPU that its
 	// renderer drew on a GPU, degraded that one drawing in software took
 	// its place, and gpuSince when the renderer was made. After a failure,
@@ -698,6 +723,11 @@ func (h *windowHost) capture() (int, int, []byte) {
 
 func (h *windowHost) detach() {
 	h.detached = true
+	if c := h.content; c != nil {
+		c.mu.Lock()
+		delete(c.hosts, h.conn)
+		c.mu.Unlock()
+	}
 	if h.idleTimer != nil {
 		h.idleTimer.Stop()
 	}

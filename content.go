@@ -24,6 +24,21 @@ type Content interface {
 	AttachContent(conn *surface.Conn)
 }
 
+// ClearFocus takes the keyboard from what has it in the window's own user
+// interface, as a press on nothing does: the field stops editing, and an
+// on-screen keyboard hides. It does nothing for a window showing a web page,
+// whose page keeps its own focus.
+func (w *Window) ClearFocus() {
+	onMain(func() {
+		if w.conn == nil {
+			return
+		}
+		if c, ok := w.content.(interface{ ClearFocus(*surface.Conn) }); ok {
+			c.ClearFocus(w.conn)
+		}
+	})
+}
+
 // attachContent connects the window's Content to its surface. Main thread
 // only.
 func (w *Window) attachContent() {
