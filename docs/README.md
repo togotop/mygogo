@@ -178,6 +178,9 @@ components, from buttons to tables.
   presses come back to Go.
 - [Widget](plugins/widget.md): the app's widget on Android's home screen.
 
+- [NetPath](plugins/netpath.md): how the device reaches the network — online or
+  not, Wi-Fi or cellular, metered or not — and each change of it.
+
 ## Reference
 
 - [Configuration](configuration.md): `mygo.config.ts`, or `mygo.json`.

@@ -27,6 +27,7 @@ import (
 	"github.com/egoist/mygo/plugins/imagepicker"
 	"github.com/egoist/mygo/plugins/location"
 	"github.com/egoist/mygo/plugins/maps"
+	"github.com/egoist/mygo/plugins/netpath"
 	"github.com/egoist/mygo/plugins/nfc"
 	"github.com/egoist/mygo/plugins/permissionflow"
 	"github.com/egoist/mygo/plugins/preferences"
@@ -455,6 +456,13 @@ func (a *app) system(c *ui.Context) {
 					case <-time.After(10 * time.Second):
 						return "no tag held against it"
 					}
+				})
+				row("How is the network", func(ctx context.Context) string {
+					p, err := netpath.Current(ctx)
+					if err != nil {
+						return err.Error()
+					}
+					return fmt.Sprintf("%s, online %v, metered %v, constrained %v", p.Interface, p.Online, p.Expensive, p.Constrained)
 				})
 				row("Say it aloud", func(ctx context.Context) string {
 					if err := speech.Speak(ctx, "Hello from MyGo", speech.Options{}); err != nil {

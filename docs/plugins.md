@@ -50,6 +50,9 @@ JavaScript package whose functions call them. The app uses the Go half with
   presses come back to Go.
 - [Widget](plugins/widget.md): the app's widget on Android's home screen.
 
+- [NetPath](plugins/netpath.md): how the device reaches the network — online or
+  not, Wi-Fi or cellular, metered or not — and each change of it.
+
 ## Using plugins
 
 `mygo.Use` takes the plugins of the app, before `App.Run`:

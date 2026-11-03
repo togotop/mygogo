@@ -401,6 +401,7 @@ if it imports it, with its usage descriptions and permissions added to the app:
 | `speech` | Text said aloud with the device's voice (Android) |
 | `tile` | The app's tile in the quick settings, whose presses come back to Go (Android) |
 | `widget` | The app's widget on the home screen, whose presses come back to Go (Android) |
+| `netpath` | How the device reaches the network — online, over what, metered — and each change (Android) |
 
 ## Writing a plugin
 
