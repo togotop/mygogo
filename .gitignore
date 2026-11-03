@@ -5,6 +5,7 @@ examples/*/dist/
 examples/*/build/
 /mygo
 /cmd/mygo/mygo
+/mobile
 packages/cli/npm/*/bin/
 .DS_Store
 mygo.ts
