@@ -1,0 +1,17 @@
+{
+  "mobile": {
+    "id": "scanner",
+    "android": {
+      "sources": [
+        "android/*.kt"
+      ],
+      "class": "ScannerPlugin",
+      "dependencies": [
+        "com.google.zxing:core:3.5.3"
+      ],
+      "manifest": [
+        "<queries><intent><action android:name=\"android.media.action.IMAGE_CAPTURE\" /></intent></queries>"
+      ]
+    }
+  }
+}
