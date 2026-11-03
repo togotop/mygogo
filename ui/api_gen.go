@@ -6190,6 +6190,20 @@ func (_handle Element) TopPercent(p float32) Element {
 	return wrapElement(_node.TopPercent(p))
 }
 
+// TouchSelection makes a finger held still on the element start a selection
+// of the text it takes itself (HandleInput with TextCaret): it hears
+// InputLongPress, then the finger's moves and its release, as a drag's, and
+// the keyboard does not open. A tap still focuses it as it would.
+func (_handle Element) TouchSelection() Element {
+	_node := _handle.node()
+	if _node == nil {
+		return Element{}
+	}
+	_ctx := _node.c
+	_ = _ctx
+	return wrapElement(_node.TouchSelection())
+}
+
 // TrackLines keeps in l where the text area lays out its lines.
 func (_handle Element) TrackLines(l *TextLines) Element {
 	_node := _handle.node()
