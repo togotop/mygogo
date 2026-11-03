@@ -1,0 +1,17 @@
+{
+  "mobile": {
+    "id": "widget",
+    "android": {
+      "sources": [
+        "android/*.kt"
+      ],
+      "class": "WidgetPlugin",
+      "application": [
+        "<receiver android:name=\"dev.mygo.WidgetProvider\" android:exported=\"true\"><intent-filter><action android:name=\"android.appwidget.action.APPWIDGET_UPDATE\" /></intent-filter><meta-data android:name=\"android.appwidget.provider\" android:resource=\"@xml/mygo_widget_info\" /></receiver>"
+      ],
+      "resources": [
+        "android/res"
+      ]
+    }
+  }
+}
