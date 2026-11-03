@@ -9,3 +9,5 @@ examples/*/build/
 packages/cli/npm/*/bin/
 .DS_Store
 mygo.ts
+docs/local/
+third_party/
