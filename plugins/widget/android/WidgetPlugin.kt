@@ -51,6 +51,10 @@ object WidgetState {
         RemoteViews(ctx.packageName, R.layout.mygo_widget).apply {
             setTextViewText(R.id.mygo_widget_title, title)
             setTextViewText(R.id.mygo_widget_text, text)
+            // What "on" looks like: the full colors when active, and the same
+            // widget asleep when not.
+            setTextColor(R.id.mygo_widget_title, if (active) 0xFFFFFFFF.toInt() else 0x99FFFFFF.toInt())
+            setTextColor(R.id.mygo_widget_text, if (active) 0xB3FFFFFF.toInt() else 0x66FFFFFF.toInt())
             setOnClickPendingIntent(R.id.mygo_widget_root, click(ctx))
         }
 

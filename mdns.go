@@ -27,8 +27,8 @@ type MDNSService struct {
 // are paced and duplicates dropped (see internal/mdns).
 //
 // A phone's Wi-Fi filters multicast unless the app holds the system's
-// multicast lock, which the Android host does not take yet: a browse there
-// finds nothing until it does.
+// multicast lock, which the first browse or advertisement asks the Android
+// host for, and the last one gives back.
 type MDNSModule struct{}
 
 // MDNS is the local network's mDNS.

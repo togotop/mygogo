@@ -59,13 +59,18 @@ class ScannerPlugin : MyGoPlugin {
                 reply.failure(PluginFailure("Canceled"))
                 return@startForResult
             }
-            val text = read(photo, args)
-            photo.delete()
-            if (text == null) {
-                reply.failure(PluginFailure("NoCode", "the photo holds no code"))
-            } else {
-                reply.success(JSONObject().put("text", text))
-            }
+            // A photo is megabytes to decode and binarize, and the result is
+            // not what the next frame draws: off the UI thread, which the
+            // reply is safe from.
+            Thread {
+                val text = read(photo, args)
+                photo.delete()
+                if (text == null) {
+                    reply.failure(PluginFailure("NoCode", "the photo holds no code"))
+                } else {
+                    reply.success(JSONObject().put("text", text))
+                }
+            }.start()
         }
     }
 

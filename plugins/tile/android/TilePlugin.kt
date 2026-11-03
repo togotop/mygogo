@@ -43,15 +43,15 @@ object TileState {
 
     fun apply(t: android.service.quicksettings.Tile) {
         t.label = label
+        // The state is as old as tiles are; the subtitle is the part that
+        // API 29 added.
+        t.state = when {
+            unavailable -> Tile.STATE_UNAVAILABLE
+            active -> Tile.STATE_ACTIVE
+            else -> Tile.STATE_INACTIVE
+        }
         if (Build.VERSION.SDK_INT >= 29) {
             t.subtitle = subtitle
-            t.state = when {
-                unavailable -> Tile.STATE_UNAVAILABLE
-                active -> Tile.STATE_ACTIVE
-                else -> Tile.STATE_INACTIVE
-            }
-        } else {
-            t.state = if (active) Tile.STATE_ACTIVE else Tile.STATE_INACTIVE
         }
         // A tile needs an icon; the system shows the app's own when it has
         // none to draw.

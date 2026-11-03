@@ -50,6 +50,11 @@ class NfcPlugin : MyGoPlugin {
     }
 
     private fun scan(reply: PluginReply) {
+        if (scanning) {
+            // Reader mode is already on: a second would double every tag.
+            reply.success(null)
+            return
+        }
         val a = adapter
         if (a == null || !a.isEnabled) {
             reply.failure(PluginFailure("Unavailable", "NFC is off"))

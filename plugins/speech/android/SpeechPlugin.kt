@@ -30,7 +30,13 @@ class SpeechPlugin : MyGoPlugin {
         }
     }
 
-    /** Runs then with a started engine, starting it the first time. */
+    /**
+     * Runs then with a started engine, starting it the first time. Calls that
+     * arrive while it starts wait for the same one: two engines would leak the
+     * first, and a race on the flags could mark a good engine failed.
+     */
+    private val starting = ArrayList<Pair<PluginReply, (TextToSpeech) -> Unit>>()
+
     private fun start(reply: PluginReply, then: (TextToSpeech) -> Unit) {
         if (failed) {
             reply.failure(PluginFailure("Unavailable", "no voice to say text with"))
@@ -41,19 +47,26 @@ class SpeechPlugin : MyGoPlugin {
             then(running)
             return
         }
-        val ctx = PluginHost.context
+        starting.add(reply to then)
+        if (running != null) {
+            return
+        }
         // The listener runs once the engine is made, so it reads it from
         // here rather than from a name of its own.
         val made = arrayOfNulls<TextToSpeech>(1)
-        val t = TextToSpeech(ctx) { status ->
+        val t = TextToSpeech(PluginHost.context) { status ->
             ready = status == TextToSpeech.SUCCESS
             failed = !ready
             val started = made[0]
-            if (ready && started != null) {
-                then(started)
-            } else {
-                reply.failure(PluginFailure("Unavailable", "the voice did not start"))
+            val waiting = starting.toList()
+            starting.clear()
+            if (!ready || started == null) {
+                for ((r, _) in waiting) {
+                    r.failure(PluginFailure("Unavailable", "the voice did not start"))
+                }
+                return@TextToSpeech
             }
+            for ((_, run) in waiting) run(started)
         }
         made[0] = t
         engine = t

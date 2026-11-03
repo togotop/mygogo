@@ -77,6 +77,11 @@ class BluetoothPlugin : MyGoPlugin {
     }
 
     private fun scan(args: JSONObject, reply: PluginReply) {
+        if (scanning) {
+            // A scan already looking: a second would double every device.
+            reply.success(null)
+            return
+        }
         val a = adapter
         if (a == null || !a.isEnabled) {
             reply.failure(PluginFailure("Unavailable", "Bluetooth is off"))
