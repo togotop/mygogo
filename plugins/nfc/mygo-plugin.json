@@ -1,0 +1,10 @@
+{
+  "mobile": {
+    "id": "nfc",
+    "android": {
+      "sources": ["android/*.kt"],
+      "class": "NfcPlugin",
+      "permissions": ["NFC"]
+    }
+  }
+}
