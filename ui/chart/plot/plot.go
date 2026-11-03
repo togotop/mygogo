@@ -72,51 +72,51 @@ var oneAxis = [1]Axis{{}}
 // Chart is a waveform view: its series, what it shows, and how it draws.
 // Keep it in the app's state; it holds the buffers of every frame.
 type Chart struct {
-	Series []*Series
-	Axes   []Axis        // zero: one left axis; at most two, left and right
-	Bands  []Band        // shaded ranges of y, under the series
-	Notes  []Note        // labels at points of the data, above the series
-	Height float32       // zero: 200
-	Time   bool          // x is seconds since the epoch, for the axis' ticks
-	Follow time.Duration // >0: pin the newest this long, in seconds of x
-	View   Viewport      // the user's zoom; a zero X fits the data
-	Sync   *Group        // share the x view and the cursor with other charts
-	Cursor  bool         // a crosshair at the pointer, reading the series there
-	Legend  bool         // a row above the plot naming the series and their values
-	Measure bool         // two markers with the change between them
-	Label  string        // what assistive technology reads as the plot's name
-	Note   string // its description, as "15 s at 1 kHz"
+	Series  []*Series
+	Axes    []Axis        // zero: one left axis; at most two, left and right
+	Bands   []Band        // shaded ranges of y, under the series
+	Notes   []Note        // labels at points of the data, above the series
+	Height  float32       // zero: 200
+	Time    bool          // x is seconds since the epoch, for the axis' ticks
+	Follow  time.Duration // >0: pin the newest this long, in seconds of x
+	View    Viewport      // the user's zoom; a zero X fits the data
+	Sync    *Group        // share the x view and the cursor with other charts
+	Cursor  bool          // a crosshair at the pointer, reading the series there
+	Legend  bool          // a row above the plot naming the series and their values
+	Measure bool          // two markers with the change between them
+	Label   string        // what assistive technology reads as the plot's name
+	Note    string        // its description, as "15 s at 1 kHz"
 
-	vx      Range          // the x range of this frame
-	p       *ui.Painter    // the painter of this frame
-	r       ui.Rect        // the plot's box this frame
-	drawFn  func(*ui.Painter, ui.Rect)      // ch.paint, made once: it escapes
-	clipFn  func()                          // ch.emit, made once: it escapes
-	inputFn func(ui.InputEvent) bool        // ch.input, made once: it escapes
-	drag    dragState
-	band    ui.Color // the drag's selection band
+	vx       Range                      // the x range of this frame
+	p        *ui.Painter                // the painter of this frame
+	r        ui.Rect                    // the plot's box this frame
+	drawFn   func(*ui.Painter, ui.Rect) // ch.paint, made once: it escapes
+	clipFn   func()                     // ch.emit, made once: it escapes
+	inputFn  func(ui.InputEvent) bool   // ch.input, made once: it escapes
+	drag     dragState
+	band     ui.Color // the drag's selection band
 	cursorOn bool
-	owns     bool    // this chart is the one with the pointer over it
-	cursorX  float64 // the pointer's x, in data units
-	mA, mB   float64 // the measurement markers, in data units
-	mFA, mFB float32 // where they are along the view, for a view that follows
-	mSet     bool    // the markers have been placed
-	mDrag    int     // 0: none, 1: A, 2: B
-	yFit     []bool // these axes were zoomed, so fitting clears them
+	owns     bool            // this chart is the one with the pointer over it
+	cursorX  float64         // the pointer's x, in data units
+	mA, mB   float64         // the measurement markers, in data units
+	mFA, mFB float32         // where they are along the view, for a view that follows
+	mSet     bool            // the markers have been placed
+	mDrag    int             // 0: none, 1: A, 2: B
+	yFit     []bool          // these axes were zoomed, so fitting clears them
 	sections []chart.Section // the axes past the right one, reused
 	mark     ui.Color
-	tint     ui.Color // the faint fill of a band
-	px      int            // the plot's pixel width, from the last paint
-	cache   []geom         // per series, keyed by the view, px and data version
-	points  [][][2]float32 // per series, the screen points, reused
-	yTicks  [][]chart.Tick // one per axis
-	xTicks  []chart.Tick
-	yLo     []float64 // one per axis
-	yHi     []float64
-	yLog    []bool
-	ticks   tickCache
-	border  ui.Color
-	version uint64 // what Touch bumps
+	tint     ui.Color       // the faint fill of a band
+	px       int            // the plot's pixel width, from the last paint
+	cache    []geom         // per series, keyed by the view, px and data version
+	points   [][][2]float32 // per series, the screen points, reused
+	yTicks   [][]chart.Tick // one per axis
+	xTicks   []chart.Tick
+	yLo      []float64 // one per axis
+	yHi      []float64
+	yLog     []bool
+	ticks    tickCache
+	border   ui.Color
+	version  uint64 // what Touch bumps
 }
 
 // geom is one series' pixel columns in data space.

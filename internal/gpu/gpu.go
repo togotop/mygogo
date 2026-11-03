@@ -255,7 +255,8 @@ type Builder struct {
 	// NoClasses puts every batch in ClassGeneral, for tests and
 	// measurements that compare the specialized shaders with the general one.
 	NoClasses bool
-	// Classes separates batches for renderers with specialized fragment shaders.
+	// Classes separates batches for renderers with specialized fragment shaders
+	// (Metal's and Direct3D 11's).
 	Classes bool
 	// GeneralClasses has a bit (1 << Class) for each class that draws with the
 	// general shader, for tests that find which specialized one differs.
@@ -297,7 +298,8 @@ type Builder struct {
 	splitScissor        Scissor
 	stack               []clip
 	// encloses tells, for each op of the scene, that it pushes a clip with
-	// a transformed op or glyph inside it.
+	// an op or glyph inside it that a transform does more than move
+	// (scene.Reshaped).
 	encloses     []bool
 	pushes       []int
 	clipShapes   []scene.ClipShape
@@ -418,8 +420,9 @@ func (b *Builder) pushed(top *clip, op *scene.Op, encloses bool) clip {
 // and composing transforms in the vertex shader. Nested affine clips use
 // cached masks; stationary clipping never rasterizes again as content moves.
 // A clip is masked only when it is transformed, nested in a transformed
-// clip, or rounded (or masked) with transformed content inside: the others
-// cut in the shader as in a scene without transforms.
+// clip, or rounded (or masked) with content inside that a transform scales,
+// turns, skews or shows in perspective: the others, and those holding
+// content only moved, cut in the shader as in a scene without transforms.
 func (b *Builder) Build(s *scene.Scene, image func(*scene.Image) uintptr) *scene.Scene {
 	if !b.NoFold {
 		s = b.fold.Fold(s)
@@ -733,17 +736,14 @@ func (b *Builder) markEnclosing(s *scene.Scene) {
 			}
 			continue
 		}
-		transformed := op.Transform.Set
-		if op.Kind == scene.OpPushClip {
-			// A clip only moved is cut as any other: no mask around it.
-			_, m := scene.MovedClip(op.Rect, op.Transform)
-			transformed = m.Set
-		}
-		if op.Kind == scene.OpGlyphs {
-			for _, g := range s.Glyphs[op.Start:op.End] {
-				transformed = transformed || g.Transform.Set
-			}
-		}
+		// The shaders cut the innermost clip in the frame's coordinates,
+		// whatever transform the drawing has, and the clips around it with
+		// the scissor rectangle; their masks keep the rounded ones' corners
+		// for drawing that is scaled, turned, skewed or in perspective
+		// (zoomed content filling a card). Drawing or a clip only moved,
+		// as a label by a fraction of a pixel, which glyphs are not folded
+		// by, is cut as drawing that is not: no mask around it (#1002).
+		transformed := scene.Reshaped(s, op)
 		// Every clip open around it encloses it, from the innermost out to
 		// the first already marked, whose own are.
 		for j := len(b.pushes) - 1; transformed && j >= 0 && !b.encloses[b.pushes[j]]; j-- {

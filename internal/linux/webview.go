@@ -41,8 +41,10 @@ var (
 	gtkContainerGetFocusChild        func(c ptr) ptr
 	webViewsLoaded                   bool
 
-	// cbWebViewFocus handles a web view's focus signal.
-	cbWebViewFocus ptr
+	// cbWebViewFocus handles a web view's focus signal, cbWebViewScroll
+	// the scroll-event of one that scrolls its container, and
+	// cbWebViewKey the key-press-events its page leaves unhandled.
+	cbWebViewFocus, cbWebViewScroll, cbWebViewKey ptr
 )
 
 func loadWebViews() {
@@ -88,6 +90,45 @@ func loadWebViews() {
 		}
 		return true
 	})
+	// The wheel and the touchpad over a web view with ScrollToContainer
+	// scroll the content around it, as over the content itself, and never
+	// reach WebKit, whose handler of the signal runs last.
+	cbWebViewScroll = purego.NewCallback(func(widget, event, data ptr) bool {
+		w := theBackend.window(data)
+		if w == nil || w.host == nil || w.host.closed || w.host.surface == nil {
+			return false
+		}
+		// The event is in the web view's window, at its allocation in the
+		// layout, which is where the area is.
+		var a gdkRectangle
+		gtkWidgetGetAllocation(w.web, &a)
+		w.host.surface.send(scrollEvent(event, float64(a.X), float64(a.Y)))
+		return true
+	})
+	// A key the page leaves unhandled, which WebKit sends again once its
+	// web process said so, and which its class handler then passes on:
+	// this handler runs after it, for those keys alone. The content takes
+	// it as if the web view's element had the focus. Tab moves the
+	// keyboard (cbWebViewFocus), a modifier key on its own is no key of
+	// the content's, and the shortcut of a menu item with a role, as Edit
+	// › Copy's, goes on to the menu (cbMenuKey). GdkEventKey: state 24,
+	// keyval 28.
+	cbWebViewKey = purego.NewCallback(func(widget, event, data ptr) bool {
+		w := theBackend.window(data)
+		if w == nil || w.host == nil || w.host.closed || w.host.surface == nil {
+			return false
+		}
+		keyval := field[uint32](event, 28)
+		if roleKeys[w.host.accel][[2]uint32{gdkKeyvalToLower(keyval), field[uint32](event, 24) & modifierMask}] {
+			return false
+		}
+		k, physical, mods := keyvalKey(keyval), eventPhysicalKey(event), gdkMods(field[uint32](event, 24))
+		if k == platform.KeyTab || modifierKeyval(keyval) != 0 || k == platform.KeyUnknown && !platform.KeyByPosition(k, physical, mods) {
+			return false
+		}
+		w.host.surface.send(platform.SurfaceEvent{Kind: platform.WebViewKey, Key: k, PhysicalKey: physical, Mods: mods, WebView: w})
+		return true
+	})
 }
 
 func (s *surface) NewWebView(o *platform.WindowOptions, h platform.WindowHandler) (platform.WebView, error) {
@@ -105,6 +146,10 @@ func (s *surface) NewWebView(o *platform.WindowOptions, h platform.WindowHandler
 	b.webViews[v.id] = v
 	v.createWebView()
 	connect(v.web, "focus", cbWebViewFocus, ptr(v.id))
+	connectAfter(v.web, "key-press-event", cbWebViewKey, ptr(v.id))
+	if o.ScrollToContainer {
+		connect(v.web, "scroll-event", cbWebViewScroll, ptr(v.id))
+	}
 	gtkWidgetSetNoShowAll(v.web, true) // hidden until placed
 	gtkLayoutPut(s.web, v.web, 0, 0)
 	b.byWebView[v.web] = v

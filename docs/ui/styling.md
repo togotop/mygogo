@@ -173,6 +173,50 @@ rather keep them dark sets both:
 t.Inverse, t.InverseText = ui.Hex("#3f3f46"), ui.Hex("#fafafa")
 ```
 
+In a window that is not the one the user's input goes to, the widgets
+fade their accent to gray, as AppKit fades an inactive window's (see
+[Active and inactive windows](windows.md#active-and-inactive-windows)):
+selected rows, checked controls, sliders and progress bars are filled
+with `InactiveAccent`, which left zero is a gray `AccentText` stands out
+on, and primary buttons look as the others. A theme that keeps its accent
+in every window sets it to the accent:
+
+```go
+t.InactiveAccent = t.Accent
+```
+
+## A theme for part of the window
+
+`SetTheme` themes the whole window: the root, its background and its text,
+and the widgets built after the call. `ui.Themed(c, t)` themes a part of
+it instead: a column whose children build with `t`, as a theme picker
+previewing light beside dark, or a light preview pane inside dark chrome:
+
+```go
+ui.Row(c).Fill().AlignItems(ui.Stretch).Children(func() {
+	for _, t := range []*ui.Theme{ui.LightTheme(), ui.DarkTheme()} {
+		ui.Themed(c, t).Grow(1).Padding(16).Gap(8).Children(func() {
+			ui.Text(c, "Preview")
+			ui.Button(c, "OK")
+		})
+	}
+})
+```
+
+Inside, everything is as in a window of `t`: `c.Theme()` returns it while
+the children build, and `Painter.Theme()` while they paint, so widgets of
+your own follow too; the widgets take its colors and its metrics
+(`Spacing`, `Radius`, `FontSize`, `ScrollbarWidth`, so `t.Space` and
+`t.Rem`); and the popovers, menus, tooltips and dialogs opened from inside
+take it, though they show above the window. The column paints `t`'s
+`Background`, and its text takes `t`'s `Text` color, `FontSize` and
+`Font`, as the root does the window's theme's; `.Background(ui.Transparent)`
+leaves what is behind it showing instead, as for the root. The root, and
+what is built after the column, keep the window's theme; toasts are the
+window's, and keep it too. Themes nest, and a nil theme makes it a plain
+column. `SetTheme` called inside still themes the window, from the root to
+what follows the column, while the column's children keep `t`.
+
 ## The desktop's preferences
 
 `c.Preferences()` returns the settings of the desktop, which the default

@@ -369,9 +369,12 @@ func textStyles(ts *textStyle, set uint32) []inspDecl {
 	}
 	var deco []string
 	if set&setUnderline != 0 && ts.underline {
-		if ts.wavy {
+		switch {
+		case ts.wavy:
 			deco = append(deco, "underline wavy")
-		} else {
+		case ts.dotted:
+			deco = append(deco, "underline dotted")
+		default:
 			deco = append(deco, "underline")
 		}
 	}

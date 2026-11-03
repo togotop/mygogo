@@ -195,14 +195,10 @@ type view struct {
 	pointer   [2]float32
 	// barHeld tells that the primary button drags the scroll bar, held
 	// barGrab DIPs below the thumb's top; overBar that the pointer is over
-	// the bar, as of its last move, and barHover as of the last build.
-	// barLit is whether the last paint showed the bar hovered or held,
-	// barBack how many rows the viewport was above the bottom, and barSeen
-	// when either last changed, from which the bar fades out.
-	barHeld, overBar, barHover, barLit bool
+	// the bar, as of its last move, and barHover as of the last build;
+	// inView that the pointer was over the terminal, which shows the bar.
+	barHeld, overBar, barHover, inView bool
 	barGrab                            float32
-	barBack                            int64
-	barSeen                            time.Time
 	// hover is the link Command is held over, which a click opens and
 	// which shows underlined, hoverLink what it opens and hoverPath
 	// whether that is a file path (HoveredLink); linkPress: the primary
@@ -257,6 +253,10 @@ type pendingKey struct {
 	// taken: Options.OnKey took the key, whose text and release are
 	// dropped.
 	taken bool
+	// sent: the key went as Alt (Option as Alt on macOS), and the text
+	// macOS still types or composes for it is dropped; its release goes
+	// as any key's.
+	sent bool
 }
 
 // build updates the view as a frame builds.
@@ -297,7 +297,8 @@ func (v *view) build(c *ui.Context, e ui.Element) {
 			v.hoverLink, v.hoverPath, v.hover = v.linkUnder(c.Modifiers(), v.pointer[0], v.pointer[1])
 		}
 		v.pointerAt = v.pointerShape(t.term, c.Modifiers())
-		v.barHover = e.Hovered() && v.overScrollbar(v.pointer[0], v.pointer[1])
+		v.inView = e.Hovered()
+		v.barHover = v.inView && v.overScrollbar(v.pointer[0], v.pointer[1])
 		if v.barHover || v.barHeld {
 			v.pointerAt = ui.CursorDefault // the bar's, not the text's
 		}
@@ -582,6 +583,11 @@ func (v *view) input(ev ui.InputEvent) bool {
 		v.typed(ev.Text)
 		return true
 	case ui.InputCompose:
+		if p := v.pending; p != nil && p.sent {
+			// A dead key's, as ´ of Option-E: refused, so that macOS
+			// gives it up rather than compose the next key with it.
+			return false
+		}
 		v.preedit, v.preeditCaret, v.pending = ev.Text, ev.Caret, nil
 		return true
 	case ui.InputCommand:
@@ -633,6 +639,9 @@ func (v *view) input(ev ui.InputEvent) bool {
 	return false
 }
 
+// goos is the system whose keys keyDown reads; tests read macOS's.
+var goos = runtime.GOOS
+
 func (v *view) keyDown(ev ui.InputEvent) bool {
 	t := v.t
 	if on := t.opts.OnKey; on != nil && on(ev.Mods, ev.Key) {
@@ -640,7 +649,7 @@ func (v *view) keyDown(ev ui.InputEvent) bool {
 		v.pending = &pendingKey{key: k, taken: true}
 		return true
 	}
-	mac := runtime.GOOS == "darwin"
+	mac := goos == "darwin"
 	mods, key := ev.Mods, ev.Key
 	if b, ok := t.binding(mods, key); ok {
 		if v.perform(b.Action, b.Performable) || !b.Performable {
@@ -659,7 +668,7 @@ func (v *view) keyDown(ev ui.InputEvent) bool {
 	}
 	altMeta := mods&ui.Alt != 0 && (!mac || t.opts.OptionAsAlt)
 	// AltGr types text on Windows, where it is Control and Alt.
-	altGr := runtime.GOOS == "windows" && mods&(ui.Ctrl|ui.Alt) == ui.Ctrl|ui.Alt
+	altGr := goos == "windows" && mods&(ui.Ctrl|ui.Alt) == ui.Ctrl|ui.Alt
 	if typesText(key) && (mods&(ui.Ctrl|ui.Alt) == 0 || mods&ui.Alt != 0 && !altMeta && mods&ui.Ctrl == 0 || altGr) {
 		// The text it types comes next.
 		v.pending = &pendingKey{key: k, unshifted: unshifted, mods: mods, repeat: ev.Repeat}
@@ -672,6 +681,11 @@ func (v *view) keyDown(ev ui.InputEvent) bool {
 		text = string(unshifted)
 		if mods&ui.Shift != 0 {
 			text = shiftedText(key, unshifted)
+		}
+		if mac {
+			// interpretKeyEvents still types the key's text, or
+			// composes it, after this.
+			v.pending = &pendingKey{key: k, sent: true}
 		}
 	}
 	action := vt.KeyPress
@@ -776,6 +790,9 @@ func (v *view) keyUp(ev ui.InputEvent) bool {
 		v.pending = nil
 		return true
 	}
+	if p := v.pending; p != nil && p.sent && p.key == k {
+		v.pending = nil // sent as it went down
+	}
 	if k == vt.KeyUnidentified || ev.Mods&ui.Super != 0 {
 		return false
 	}
@@ -804,8 +821,8 @@ func (v *view) typed(text string) {
 	v.preedit = ""
 	p := v.pending
 	v.pending = nil
-	if p != nil && p.taken {
-		return // the text of a key OnKey took
+	if p != nil && (p.taken || p.sent) {
+		return // the text of a key OnKey took, or sent as Alt
 	}
 	if p == nil {
 		// Text without a key: of an input method, or every key typing
@@ -1180,7 +1197,7 @@ func (v *view) scrollbarEvent(ev ui.InputEvent) bool {
 	case v.barHeld:
 		v.dragScrollbar(ev.Y)
 	case v.overBar && ev.Kind == ui.InputPointerDown && ev.Button == 0:
-		y, h := thumb(v.t.term.Scrollbar(), v.size[1])
+		y, h := bar(v.t.term.Scrollbar(), ui.Rect{H: v.size[1]}).Thumb()
 		v.barGrab = h / 2
 		if ev.Y >= y && ev.Y < y+h {
 			v.barGrab = ev.Y - y
@@ -1201,13 +1218,7 @@ func (v *view) dragScrollbar(y float32) {
 	if sb.Total <= sb.Len {
 		return
 	}
-	_, h := thumb(sb, v.size[1])
-	travel := v.size[1] - h
-	if travel <= 0 {
-		return
-	}
-	f := max(0, min((y-v.barGrab)/travel, 1))
-	to := int(math.Round(float64(f) * float64(sb.Total-sb.Len)))
+	to := int(math.Round(float64(bar(sb, ui.Rect{H: v.size[1]}).OffsetAt(y - v.barGrab))))
 	if d := to - int(sb.Offset); d != 0 {
 		term.ScrollBy(d)
 		v.services.Invalidate()

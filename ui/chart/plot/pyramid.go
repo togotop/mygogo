@@ -11,8 +11,8 @@ var levelShifts = []uint{6, 8, 10, 12, 14, 16}
 // It is built on demand, and rebuilt when the samples change.
 type pyramid struct {
 	lo, hi [][]float32
-	n      int         // the samples it covers
-	x0, dx float64     // the grid it was built on
+	n      int     // the samples it covers
+	x0, dx float64 // the grid it was built on
 }
 
 // levelFor returns the level whose buckets are no wider than the samples
@@ -51,7 +51,7 @@ func (py *pyramid) buildLevel(s *Series, k int) {
 	nan := float32(math.NaN())
 	sh := levelShifts[k]
 	if k == 0 {
-		n := (s.Count() + (1<<sh) - 1) >> sh
+		n := (s.Count() + (1 << sh) - 1) >> sh
 		lo, hi := make([]float32, n), make([]float32, n)
 		for b := range n {
 			l, h := nan, nan

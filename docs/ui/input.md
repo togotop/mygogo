@@ -37,7 +37,10 @@ from them.
 Elements that take the pointer give it to the innermost under it: a button
 in a clickable row takes its own clicks.
 
-`Pressed` stays true while the pointer is held inside the element. Observing
+`Pressed` stays true while the pointer is held inside the element. A
+release that comes with moves no build has read leaves the element
+pressed for the build that reads them, with the pointer where it let go
+(`PointerPosition`), and released in the build after. Observing
 the start of a press rebuilds the view before painting, so a row chosen by
 `if row.Pressed() || row.Clicked()` shows its new selection and focus colors
 in that frame. Guard the choice against selecting the same item again.
@@ -168,7 +171,9 @@ of [menus](../menus.md) still work, and the Edit menu's roles (cut, copy,
 paste, select all, undo, redo) act on the focused text input. Where the
 focus takes no such command, as a list with nothing editable, the role
 goes to the shortcuts of its key, so `c.Shortcut(ui.Cmd, ui.KeyV)` sees
-Paste on macOS too, where the menu takes Command+V before the window.
+Paste on macOS too, where the menu takes Command+V before the window. The
+Edit menu enables a role's item only while the focus, or such a shortcut,
+would take it.
 
 Shortcuts work on layouts that type no Latin letters too: with Cmd, Ctrl,
 Alt or Super held, a key typing a letter of no US key, as ы on a Russian

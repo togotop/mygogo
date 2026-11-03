@@ -28,10 +28,10 @@ func (r Range) Valid() bool { return r.Hi > r.Lo }
 // with Swap; the view adopts it on its next frame.
 type Series struct {
 	Name string
-	Y     []float32
-	X0    float64
-	Dx    float64
-	X     []float64 // irregular x, ascending; nil means X0 + i*Dx
+	Y    []float32
+	X0   float64
+	Dx   float64
+	X    []float64 // irregular x, ascending; nil means X0 + i*Dx
 	// Head is where the oldest sample is when Y is a ring that wraps: the
 	// i-th sample is at Y[(Head+i)%len(Y)]. Zero for a plain column.
 	Head int

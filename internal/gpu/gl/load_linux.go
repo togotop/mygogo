@@ -10,14 +10,12 @@ import (
 	"github.com/ebitengine/purego"
 )
 
-
 // load takes the GL entry points from libepoxy, which GTK resolves its own
 // through: libepoxy exports a pointer per function, to a stub that finds the
 // one of the current context when first called. That indirection is what
 // lets the same binary draw in two windows whose contexts differ.
 //
 // Android has no libepoxy; load_android.go asks EGL instead.
-
 
 // The GTK functions MakeAreaCurrent calls, resolved in load when GTK is
 // loaded: a GtkGLArea's context is current before GTK's render signal, but a
@@ -74,21 +72,21 @@ func load() error {
 		gl(&glGetProgramInfoLog, "glGetProgramInfoLog")
 		gl(&glUseProgram, "glUseProgram")
 		gl(&glDeleteProgram, "glDeleteProgram")
-			gl(&glGetUniformLocation, "glGetUniformLocation")
-			gl(&glGetUniformBlockIndex, "glGetUniformBlockIndex")
-			gl(&glUniformBlockBinding, "glUniformBlockBinding")
-			gl(&glUniform1i, "glUniform1i")
+		gl(&glGetUniformLocation, "glGetUniformLocation")
+		gl(&glGetUniformBlockIndex, "glGetUniformBlockIndex")
+		gl(&glUniformBlockBinding, "glUniformBlockBinding")
+		gl(&glUniform1i, "glUniform1i")
 		gl(&glUniform2f, "glUniform2f")
 		gl(&glUniform1f, "glUniform1f")
-			gl(&glUniform2i, "glUniform2i")
-			gl(&glUniform4i, "glUniform4i")
+		gl(&glUniform2i, "glUniform2i")
+		gl(&glUniform4i, "glUniform4i")
 		gl(&glCopyTexSubImage2D, "glCopyTexSubImage2D")
 		gl(&glGenVertexArrays, "glGenVertexArrays")
 		gl(&glBindVertexArray, "glBindVertexArray")
 		gl(&glDeleteVertexArrays, "glDeleteVertexArrays")
 		gl(&glGenBuffers, "glGenBuffers")
-			gl(&glBindBuffer, "glBindBuffer")
-			gl(&glBindBufferBase, "glBindBufferBase")
+		gl(&glBindBuffer, "glBindBuffer")
+		gl(&glBindBufferBase, "glBindBufferBase")
 		gl(&glBufferData, "glBufferData")
 		gl(&glDeleteBuffers, "glDeleteBuffers")
 		gl(&glEnableVertexAttrib, "glEnableVertexAttribArray")
@@ -142,7 +140,6 @@ func load() error {
 	})
 	return errLoad
 }
-
 
 // MakeAreaCurrent makes the context of a GtkGLArea current again, with the
 // area's framebuffer bound, when it no longer is during the area's render

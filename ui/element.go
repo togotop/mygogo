@@ -166,6 +166,7 @@ type textStyle struct {
 	align      Align
 	underline  bool
 	wavy       bool
+	dotted     bool
 	strike     bool
 	spacing    float32 // letter spacing
 	features   string
@@ -385,9 +386,12 @@ type node struct {
 	runes     [2]int
 	frags     []Rect
 	ts        textStyle
-	image     *Bitmap
-	svg       *SVG // of an Icon, or an Image in its own colors
-	webView   NativeWebView
+	// themed is the theme the element's children build and paint with,
+	// in place of the window's (Themed).
+	themed  *Theme
+	image   *Bitmap
+	svg     *SVG // of an Icon, or an Image in its own colors
+	webView NativeWebView
 	// maximizeButton marks the window's maximize button (MaximizeButton).
 	maximizeButton bool
 	fit            Fit
@@ -437,12 +441,18 @@ type node struct {
 	// listRow is set on the elements holding its rows, rowIndex their row.
 	// rowsOf is the list whose rows the element holds for assistive
 	// technology, and takes the keys for: the list, or its Table.
-	// popover is the anchor of the panel of a popover.
-	popover  *node
-	list     *listFrame
-	listRow  bool
-	rowIndex int
-	rowsOf   *listFrame
+	// popover is the anchor of the panel of a popover. hideScrollbars and
+	// keepScrollbars are the element's Scrollbars and KeepScrollbars, and
+	// barsFrom the element whose they are instead, as a table's for the
+	// list of its rows.
+	popover        *node
+	list           *listFrame
+	listRow        bool
+	hideScrollbars bool
+	keepScrollbars bool
+	barsFrom       *node
+	rowIndex       int
+	rowsOf         *listFrame
 	// focusGroup makes the element a focus group (FocusGroup), whose
 	// arrows click the element they move to with groupSelects.
 	focusGroup   Orientation
@@ -511,10 +521,12 @@ type node struct {
 	laid uint64
 	// leaving marks a copy of an element gone, which its exit transition
 	// animates (1 if it was in its parent's flow, 2 if absolute), and
-	// ghosts an element holding such copies. attach is where Attach puts
-	// the element, 0 for nowhere.
+	// ghosts an element holding such copies; lift one flying with a
+	// Match, which paints over the rest of its layer (matches.lifted).
+	// attach is where Attach puts the element, 0 for nowhere.
 	leaving uint8
 	ghosts  bool
+	lift    bool
 	attach  attachment
 	// serial is the order the pass made the element in: of overlays, the
 	// one made last shows on top.
@@ -699,7 +711,19 @@ func (e *node) Children(fn func()) *node {
 	c := e.c
 	saved := c.parent
 	c.parent = e
-	fn()
+	if t := e.themed; t != nil {
+		// As Toolbar flips c.buttons for its controls.
+		outer, window := c.theme, c.window
+		c.theme = t
+		fn()
+		if outer == window {
+			// SetTheme called inside themes what follows the scope.
+			outer = c.window
+		}
+		c.theme = outer
+	} else {
+		fn()
+	}
 	c.parent = saved
 	if e.kind == kindText && e.first != nil {
 		e.inlineText()
@@ -820,6 +844,33 @@ func (e *node) ScrollbarInsets(v ...float32) *node { e.barInset = edges(v); retu
 // Apply to Scroll, ScrollHorizontal, ScrollBoth, List, GridView or TextArea
 // each frame.
 func (e *node) HideScrollbars() *node { e.flags |= flagHideScrollbars; return e }
+
+// Scrollbars controls the overlay indicators and their pointer hit targets on
+// this scroll container. They show on hover by default. With false, scrolling
+// by wheel, TrackScroll, keyboard focus and accessibility remains available.
+// It applies to Scroll, ScrollHorizontal, ScrollBoth, List and Table, not the
+// internal indicators of custom controls such as a code editor (whose State
+// has NoScrollbars), and is not inherited.
+func (e *node) Scrollbars(visible bool) *node { e.hideScrollbars = !visible; return e }
+
+// KeepScrollbars keeps this scroll container's scroll bars showing while its
+// content overflows it, with the pointer over it or not, rather than only
+// while it is hovered or a bar is dragged: a view whose place in its content
+// matters, as a long diff filling a window, shows how far down it is. The
+// bars look and take presses as they do on hover; Scrollbars(false) hides
+// them still. It applies where Scrollbars does (a code editor's State has
+// KeepScrollbars), and is not inherited.
+func (e *node) KeepScrollbars(keep bool) *node { e.keepScrollbars = keep; return e }
+
+// scrollbars returns whether the element hides its scroll bars
+// (Scrollbars(false)) and whether it keeps them showing (KeepScrollbars),
+// as it says or the element it takes them from does (barsFrom).
+func (e *node) scrollbars() (hide, keep bool) {
+	if e.barsFrom != nil {
+		e = e.barsFrom
+	}
+	return e.hideScrollbars, e.keepScrollbars
+}
 
 // Width sets the width in DIPs.
 func (e *node) Width(v float32) *node { e.width = px(v); return e }
@@ -1331,14 +1382,22 @@ func (e *node) TextAlign(a Align) *node { e.ts.align = a; e.ts.set |= setAlign; 
 
 // Underline underlines text.
 func (e *node) Underline() *node {
-	e.ts.underline, e.ts.wavy = true, false
+	e.ts.underline, e.ts.wavy, e.ts.dotted = true, false, false
 	e.ts.set |= setUnderline
 	return e
 }
 
 // WavyUnderline underlines text with a wave, as spell checkers mark words.
 func (e *node) WavyUnderline() *node {
-	e.ts.underline, e.ts.wavy = true, true
+	e.ts.underline, e.ts.wavy, e.ts.dotted = true, true, false
+	e.ts.set |= setUnderline
+	return e
+}
+
+// DottedUnderline underlines text with a line of dots, as links mark
+// hover.
+func (e *node) DottedUnderline() *node {
+	e.ts.underline, e.ts.wavy, e.ts.dotted = true, false, true
 	e.ts.set |= setUnderline
 	return e
 }

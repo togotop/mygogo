@@ -58,9 +58,9 @@ var (
 	probeOn = flag.Bool("probe", false, "print the plot's spans once a second")
 	live    = flag.Bool("live", false, "stream a second of samples at a time instead of a static minute")
 
-	measure bool   // the two markers
-	showBand bool  // the tolerance band
-	saved   string // what the last export did
+	measure  bool   // the two markers
+	showBand bool   // the tolerance band
+	saved    string // what the last export did
 )
 
 // band is the tolerance the demo shades: the input's expected range.

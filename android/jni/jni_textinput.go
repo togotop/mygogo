@@ -465,7 +465,8 @@ func Java_org_mygo_MygoIme_nativeSelectionStart(env *C.JNIEnv, thiz C.jobject) C
 // Java side anyway, because the constants are Java's.
 //
 // The order must match ReturnKey.kt on the Kotlin side:
-//   0 none, 1 done, 2 go, 3 next, 4 search, 5 send, 6 continue.
+//
+//	0 none, 1 done, 2 go, 3 next, 4 search, 5 send, 6 continue.
 //
 //export Java_org_mygo_MygoIme_nativeReturnKey
 func Java_org_mygo_MygoIme_nativeReturnKey(env *C.JNIEnv, thiz C.jobject) C.jint {

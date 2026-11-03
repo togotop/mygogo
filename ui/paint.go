@@ -21,6 +21,9 @@ type Painter struct {
 	clip      Rect
 	transform scene.Affine
 	inline    *node
+	// theme is that of the innermost Themed around the element painting
+	// (Theme), nil outside any.
+	theme *Theme
 	// opaque tells that the glyphs painted now land on an opaque
 	// background, which subpixel glyphs need: the root's, covering the
 	// window, or that of an element around them, as a pane beside a
@@ -38,6 +41,10 @@ type Painter struct {
 	// window's scene, and asked that it asked to be painted again (see
 	// paintPart).
 	drawing, asked bool
+	// lifting is the element flying (ElementTransition.Fly) being painted
+	// over the rest of its layer (matches.paint), which elsewhere paints
+	// nothing.
+	lifting *node
 }
 
 // opaqueBox is the box of an element painting an opaque background, and
@@ -230,12 +237,15 @@ func (p *Painter) paintable(e *node) bool {
 }
 
 func (p *Painter) element(e *node) {
-	if e.hidden {
+	if e.hidden || e.lift && p.lifting != e {
 		return
 	}
-	savedTransform, savedInline := p.transform, p.inline
+	savedTransform, savedInline, savedTheme := p.transform, p.inline, p.theme
 	p.transform, p.inline = e.world, nil
-	defer func() { p.transform, p.inline = savedTransform, savedInline }()
+	if e.themed != nil {
+		p.theme = e.themed
+	}
+	defer func() { p.transform, p.inline, p.theme = savedTransform, savedInline, savedTheme }()
 
 	if e.styleFn != nil {
 		e.styleFn(e)
@@ -275,8 +285,11 @@ func (p *Painter) element(e *node) {
 	// What the element paints lands on an opaque background when all of
 	// it that shows does.
 	p.opaque = p.covered(intersect(box, p.clip))
-	if e.world.Set {
-		// Transformed glyphs are drawn with grayscale coverage.
+	if e.world.Set && (p.lifting == nil || !translates(e.world)) {
+		// Transformed glyphs are drawn with grayscale coverage; but those
+		// of an element flying, which a translation shows where it is
+		// (matches.pin), as at rest, which renderers make gray while it
+		// moves, so that they are the text at rest once there.
 		p.opaque = false
 	}
 	margin := e.shadowMargin()
@@ -351,18 +364,36 @@ func (p *Painter) element(e *node) {
 				}
 			}
 		}
+		// Elements flying go over their layer: the window's content, under
+		// its overlays, or their overlay, under those after it.
+		m := p.rt.matches
+		layers := m != nil && e == e.c.overlay
 		for c := e.first; c != nil; c = c.next {
 			if c.flags&flagAbsolute == 0 && p.paintable(c) {
 				p.element(c)
+				if layers {
+					m.paint(p, c)
+				}
 			}
 		}
 		if e.flags&flagDividers != 0 && !e.grid {
 			p.dividers(e)
 		}
+		content := m != nil && e.parent == nil
 		for c := e.first; c != nil; c = c.next {
+			if content && c == e.c.overlay {
+				m.paint(p, nil)
+				content = false
+			}
 			if c.flags&flagAbsolute != 0 && c.leaving == 0 && p.paintable(c) {
 				p.element(c)
+				if layers {
+					m.paint(p, c)
+				}
 			}
+		}
+		if content {
+			m.paint(p, nil)
 		}
 	}
 	if clips {
@@ -386,6 +417,12 @@ func (p *Painter) element(e *node) {
 	}
 	p.opacity = saved
 	p.opaque, p.under = savedOpaque, p.under[:under]
+}
+
+// translates reports whether m only moves what it transforms.
+func translates(m scene.Affine) bool {
+	_, _, ok := m.Translation()
+	return ok
 }
 
 // covered reports whether an opaque background around the element painting
@@ -774,7 +811,7 @@ func (p *Painter) textLayout(l *text.Layout, x, y float32, color Color, ts textS
 		if ed := e.st.editor; ed != nil && e.flags&flagSelectable != 0 && p.rt.textSelectionVisible(e.st) {
 			if a, b := ed.selection(); a != b {
 				for _, r := range l.Selection(a, b) {
-					p.Fill(Rect{x + r.X, y + r.Y, r.W, r.H}, ts.selectionColor(e.c.theme), 0)
+					p.Fill(Rect{x + r.X, y + r.Y, r.W, r.H}, ts.selectionColor(p.Theme()), 0)
 				}
 			}
 		}
@@ -847,7 +884,7 @@ func (p *Painter) textForeground(l *text.Layout, x, y float32, color Color, ts t
 	}
 	sys := p.rt.text
 	s := p.scale
-	deco := decoration{underline: ts.underline, wavy: ts.wavy, strike: ts.strike, color: ts.decoColor, thick: ts.decoThick}
+	deco := decoration{underline: ts.underline, wavy: ts.wavy, dotted: ts.dotted, strike: ts.strike, color: ts.decoColor, thick: ts.decoThick}
 	shade := text.ShadeOf(color.R, color.G, color.B)
 	start := int32(len(p.s.Glyphs))
 	// Inline transforms do not change while the text paints; look for them once.
@@ -958,7 +995,7 @@ func (r *glyphRun) flush(p *Painter, baseline float32) {
 
 // decoration is how lines go through or under text.
 type decoration struct {
-	underline, wavy, strike bool
+	underline, wavy, dotted, strike bool
 	// color, if set, is the lines', and thick their thickness in DIPs.
 	color Color
 	thick float32
@@ -1004,6 +1041,10 @@ func (p *Painter) decorationRun(l *text.Layout, li, i, j int, x, y float32, d de
 				p.wave(st.X0, st.X1, (st.Top+st.Bottom)/2, max(st.Bottom-st.Top, 1), c)
 				continue
 			}
+			if k == text.Underline && d.dotted {
+				p.dots(st.X0, st.X1, st.Bottom, st.Bottom-st.Top, c)
+				continue
+			}
 			p.add(scene.Op{Kind: scene.OpFill, Rect: scene.Rect{X: st.X0, Y: st.Top, W: st.X1 - st.X0, H: st.Bottom - st.Top}, Color: c.scene(), Wide: p.wide(c, Color{}, Color{}), Opacity: p.opacity})
 		}
 	}
@@ -1025,6 +1066,16 @@ func (p *Painter) wave(x0, x1, y, thick float32, c Color) {
 		path.LineTo(x/s, (y-amp*float32(math.Sin(float64((x-x0)/length*2*math.Pi))))/s)
 	}
 	p.StrokePath(&path, thick/s, c)
+}
+
+// dots fills square dots as thick as the underline's stroke, which ends
+// at bottom in device pixels, every three DIPs or two dots' widths apart
+// when they are thicker, as links mark hover.
+func (p *Painter) dots(x0, x1, bottom, thick float32, c Color) {
+	size := max(float32(math.Round(float64(thick))), 1)
+	for x := x0; x < x1; x += max(3*p.scale, 2*size) {
+		p.add(scene.Op{Kind: scene.OpFill, Rect: scene.Rect{X: x, Y: bottom - size, W: size, H: size}, Color: c.scene(), Wide: p.wide(c, Color{}, Color{}), Opacity: p.opacity})
+	}
 }
 
 // contentBox returns the element's box inside its padding and border.
@@ -1094,7 +1145,7 @@ func (p *Painter) scrollbars(e *node) {
 	}
 	st := e.st
 	rt := e.c.rt
-	theme := e.c.theme
+	theme := p.Theme()
 	hovered := false
 	for _, id := range rt.hover {
 		if id == e.id {
@@ -1104,8 +1155,10 @@ func (p *Painter) scrollbars(e *node) {
 	}
 	dragging := rt.scrollDrag.st == st
 	// A press takes the bars only where the window shows them
-	// (scrollbarPress).
-	st.barsShown = hovered || dragging
+	// (scrollbarPress). Kept, they show as on hover, the same thumb on no
+	// track, so that the pointer coming over changes nothing.
+	hide, keep := e.scrollbars()
+	st.barsShown = !hide && (keep || hovered || dragging)
 	if !st.barsShown {
 		return
 	}
@@ -1122,18 +1175,10 @@ func (p *Painter) scrollbars(e *node) {
 	}
 	g := scrollBars(Rect{e.x, e.y, e.w, e.h}, e.barInset, float32(w), float32(h), float32(x), float32(y), e.flags, theme.scrollbarWidth(), e.rtl())
 	if g.vertical {
-		bar := g.v
-		if dragging && !rt.scrollDrag.horizontal {
-			bar.X, bar.W = bar.X-2, bar.W+2
-		}
-		p.fill(bar, [4]float32{bar.W / 2, bar.W / 2, bar.W / 2, bar.W / 2}, color, 0, Color{})
+		p.scrollThumbFill(g.v, false, dragging && !rt.scrollDrag.horizontal, color)
 	}
 	if g.horizontal {
-		bar := g.h
-		if dragging && rt.scrollDrag.horizontal {
-			bar.Y, bar.H = bar.Y-2, bar.H+2
-		}
-		p.fill(bar, [4]float32{bar.H / 2, bar.H / 2, bar.H / 2, bar.H / 2}, color, 0, Color{})
+		p.scrollThumbFill(g.h, true, dragging && rt.scrollDrag.horizontal, color)
 	}
 }
 
@@ -1336,7 +1381,7 @@ func (p *Painter) Image(src ImageSource, r Rect, fit Fit) {
 			p.drawBitmap(s, r, fit, [4]float32{}, false)
 		}
 	case *SVG:
-		p.drawSVG(s, r, fit, [4]float32{}, p.rt.c.theme.Text, false)
+		p.drawSVG(s, r, fit, [4]float32{}, p.Theme().Text, false)
 	}
 }
 
@@ -1401,7 +1446,7 @@ func (p *Painter) FocusRing(r Rect, radius [4]float32) {
 	for i := range radius {
 		radius[i] += w + 1
 	}
-	p.fill(o, radius, Color{}, w, p.rt.c.theme.Focus)
+	p.fill(o, radius, Color{}, w, p.Theme().Focus)
 }
 
 // Clip restricts what fn draws to r.

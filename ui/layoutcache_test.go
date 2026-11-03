@@ -450,13 +450,16 @@ func TestLayoutInputs(t *testing.T) {
 	// Fields the layout never reads.
 	other := "gestureEnabled router routerLevel epoch key valueInput id depth track transform originX originY originSet world content contentSet " +
 		"pose poseAnim poseSet poseM poseFade reposed ink noCull backface bg fill grad stripes borderC borderStyle radius " +
-			"shadows material effect effecting cache grads blur opacity opacitySet cursor paintFn objectFn styleFn paintAfterFn " +
-			"inputFn textClient caret caretFn textContext takesText touchScroll touchSelection inputOptions " +
-			"inputAccessory inputAction inputModifiers inputConsumed noIME copyData webView maximizeButton fit gray dismissed rotate label widget role " +
+		"shadows material effect effecting cache grads blur opacity opacitySet cursor paintFn objectFn styleFn paintAfterFn " +
+		"inputFn textClient caret caretFn textContext takesText touchScroll touchSelection inputOptions " +
+		"inputAccessory inputAction inputModifiers inputConsumed noIME copyData webView maximizeButton fit gray dismissed rotate label widget role " +
 		"checked expanded vertical tip highlighted accValue accRange hasRange accFill accStep barInset scrollBase " +
+		"shadows material effect effecting cache grads blur opacity opacitySet cursor paintFn objectFn styleFn paintAfterFn " +
+		"inputFn textClient caret takesText noIME copyData webView maximizeButton fit gray dismissed rotate label widget role " +
+		"checked expanded vertical tip highlighted accValue accRange hasRange accFill accStep barInset scrollBase hideScrollbars keepScrollbars barsFrom " +
 		"listRow rowIndex rowsOf focusGroup groupSelects segment activeDescendant nameFrom nameJoin focusTo " +
 		"setPos setSize choosesItems search description invalid followX sort level expandable " +
-		"chooseMany serial ignoreInput"
+		"chooseMany serial ignoreInput themed lift"
 	known := map[string]bool{}
 	for _, f := range strings.Fields(read + " " + other) {
 		known[f] = true

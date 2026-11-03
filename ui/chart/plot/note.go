@@ -11,7 +11,7 @@ import (
 // placed for you: keep a note a little clear of the right edge.
 type Note struct {
 	X, Y  float64
-	Axis  int      // the y axis Y is on; 0 when out of range
+	Axis  int // the y axis Y is on; 0 when out of range
 	Text  string
 	Color ui.Color // zero: the theme's accent and muted text
 }

@@ -48,9 +48,11 @@ func main() {
 `Window.NewWebView` makes a web view of a window showing `Content`, which
 it closes with. Its options are the page's (`Page`, as a window's
 `PageOptions`), the `URL` to load, a `BackgroundColor` to fill it with
-until the page paints, and `Transparent`, which shows what is behind the
+until the page paints, `Transparent`, which shows what is behind the
 web view through the transparent parts of its page: the window's
-background or material, as native UI paints nothing under a web view.
+background or material, as native UI paints nothing under a web view,
+and `ScrollToContainer`, which gives the wheel over the page to the
+native UI around it ([below](#scrolling-the-native-ui-around-it)).
 `WebView.Page` returns its page, whose methods are a window's page's:
 `LoadURL`, `LoadHTML`, `Eval`, `GoBack`, `OnDidNavigate`, `OnWillNavigate`
 and the others. `Focus` gives it the keyboard, `SetBackgroundColor`
@@ -114,17 +116,120 @@ takes the pointer: a dialog's backdrop or a select's keeps the pointer
 from the page while open, a popover keeps it only over its panel, and an
 element with `PassThrough` lets it through. Files dragged there drop on
 the page. A press on the page closes the popovers it is outside of
-(`PressedOutside`), and takes the keyboard from the native UI, which gets
-it back as the user clicks it. The page sets the cursor over it.
+(`PressedOutside`), and gives the page the keyboard: the native UI's focus
+goes to the web view's element, and the native UI gets the keyboard back
+as the user clicks it. The page sets the cursor over it.
 
 Tab stops at the web view among the native UI's controls: its page takes
 the keyboard at its first element, or its last with Shift+Tab, Tab moves
 through its elements, and past its last one goes on to the control after
 the web view. `Focus` gives the page the keyboard where it had it.
 
+## Keys the page leaves
+
+A mail app shows a message's HTML in a web view beside a list that the
+keyboard drives: J and K move through the messages, and Cmd+K (Ctrl+K on
+Windows and Linux) opens a command palette. The user clicks into the
+message to select text or follow a link, and the page has the keyboard,
+but J, K and Cmd+K keep working: the keys the page leaves unhandled go to
+the native UI as if the web view's element had the focus. The shortcuts
+of the elements around it (`Element.Shortcut`) and the window's
+(`c.Shortcut`) see them, the keys that scroll scroll the container around
+it, and Escape closes a dialog or a flyout of native UI. The keyboard
+stays with the page, which still selects, copies, types and follows its
+links.
+
+```go
+func (app *mail) view(c *ui.Context) {
+	if c.Shortcut(ui.Cmd, ui.KeyK) {
+		app.palette = true
+	}
+	reader := ui.Row(c).Fill().AlignItems(ui.Stretch).Children(func() {
+		app.list(c)
+		ui.WebView(c, app.message).Grow(1) // an untrusted page
+	})
+	if reader.Shortcut(0, ui.KeyJ) {
+		app.next()
+	}
+	if reader.Shortcut(0, ui.KeyK) {
+		app.previous()
+	}
+}
+```
+
+The page keeps a key when it:
+
+- cancels it (`preventDefault` in a `keydown` handler);
+- types or edits with it in a text field, a textarea or editable content,
+  or an input method composes with it, or it types a character with
+  AltGr, as @ on a German keyboard, wherever the focus is;
+- acts with it: Enter or Space on a link or a button, the arrows on a
+  slider, Ctrl+C copying its selection, the arrows, Space and Page Down
+  scrolling it while it can scroll that way;
+- or it is Tab, which moves through the page and out of it, or a modifier
+  key on its own.
+
+The keys of untrusted pages and of the frames in a page come too, and a
+page cannot make up a key: the native UI gets only those the user
+pressed.
+
+- **macOS** and **Linux**: WebKit decides which keys the page handled,
+  and sends the others on to the web view's parent (AppKit's responder
+  chain, GTK's `key-press-event` once WebKit's web process answered),
+  where MyGo takes them. On Linux WebKitGTK keeps the arrow keys, and
+  the shortcuts of the menu items with a role, as Edit › Copy's, go on
+  to the menu.
+- **Windows**: WebView2 tells of no such key. A script in an isolated
+  world of each document, of the page and of its frames, sees the page's
+  keys after its handlers ran and tells MyGo of those it left, by the
+  rules above. The page's own scripts reach neither the script nor its
+  way to MyGo, and the script needs no bridge, so untrusted pages give
+  their keys too. A frame of another site, which WebView2 runs in a
+  process of its own, keeps its keys.
+- **Browsers** (`GOOS=js`) have no web views.
+
 Assistive technology finds the page inside the web view's element, where
 it is among the native UI: VoiceOver and Orca read and move through it as
 through the controls around it.
+
+## Scrolling the native UI around it
+
+A reader shows a document in a native scroll container: an article
+between a native header and its comments, a message in a mail thread, a
+rendered note among native cards. The web view is as tall as its page,
+which has nothing of its own to scroll, and the wheel over the page should
+scroll the container, as it does over the native elements around it.
+`WebViewOptions.ScrollToContainer` does that: the wheel and the touchpad
+over the web view scroll the native UI under the pointer as over any of
+its elements, by lines for a mouse's wheel and by pixels for a touchpad,
+in the same direction, with the modifier keys held. The page never
+scrolls with them; it still takes the pointer's presses, the keyboard,
+selection and a touchpad's pinch.
+
+```go
+article, _ := win.NewWebView(mygo.WebViewOptions{URL: "/article", ScrollToContainer: true})
+
+// In the view:
+ui.Scroll(c).Fill().Children(func() {
+	header(c)
+	ui.WebView(c, article).Height(app.articleHeight) // the page's height, which it tells the app
+	comments(c)
+})
+```
+
+Without it, which is the default, the page takes the wheel where it
+shows, as a page that scrolls itself needs: docs, a browser's tab, an
+editor.
+
+- **macOS**: the web view's scroll events, a touchpad's momentum
+  included, go to the native UI instead of WebKit.
+- **Windows**: the window keeps the wheel messages over the web view
+  instead of sending them on to WebView2. A touchpad's pinch, which
+  Windows sends as the wheel with Ctrl held, still zooms the page.
+- **Linux**: the web view's scroll events go to the native UI before
+  WebKitGTK sees them.
+- **Browsers** (`GOOS=js`) have no web views, so the option does nothing
+  there.
 
 ## Its page
 

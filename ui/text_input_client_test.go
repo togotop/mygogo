@@ -98,6 +98,34 @@ func TestTextInputClientCompositionAndReplacement(t *testing.T) {
 	}
 }
 
+// TestCompositionTaken: the window tells the system whether the focus took
+// a composition, which input methods give up otherwise on macOS. An element
+// taking text itself (TextCaret) that leaves one, as a terminal leaves the
+// dead key of a key it sent as Alt, does not take it; a text input client
+// takes it, whatever its HandleInput answers.
+func TestCompositionTaken(t *testing.T) {
+	take := true
+	tt := coreNewTester(func(c *context) {
+		coreBox(c).Size(100, 40).Focusable().AutoFocus().TextCaret(Rect{0, 0, 1, 16}).HandleInput(func(ev InputEvent) bool {
+			return ev.Kind != InputCompose || take
+		})
+	}, 200, 100)
+	defer tt.rt.close()
+	compose := platform.SurfaceEvent{Kind: platform.TextComposition, Text: "´", Caret: 1}
+	if !tt.send2(compose) {
+		t.Error("a composition the element took was not taken")
+	}
+	take = false
+	if tt.send2(compose) {
+		t.Error("a composition the element left was taken")
+	}
+	client := primitiveTester(&primitiveClient{})
+	defer client.rt.close()
+	if !client.send2(compose) {
+		t.Error("a text input client's composition was not taken")
+	}
+}
+
 func TestTextInputClientNativeEndBeforeCommit(t *testing.T) {
 	c := &primitiveClient{text: "abc", selection: TextInputSelection{Range: TextInputRange{Start: 3, End: 3}}}
 	tt := primitiveTester(c)
@@ -119,6 +147,33 @@ func TestTextInputClientNativeEndBeforeCommit(t *testing.T) {
 	composition.Replace(client, nil, "!")
 	if c.text != "abcé候補!" {
 		t.Fatal("stale commit range survived reset", c.text)
+	}
+}
+
+// An input method that gives its composition up with no empty preedit
+// first, as IMM32's Microsoft Japanese IME does on Esc, leaves the text
+// as it was before the composition.
+func TestTextInputClientNativeCancel(t *testing.T) {
+	c := &primitiveClient{text: "abc", selection: TextInputSelection{Range: TextInputRange{Start: 1, End: 3}}}
+	tt := primitiveTester(c)
+	defer tt.rt.close()
+	client := tt.h.ime.Client
+	var composition platform.InputComposition
+	composition.Cancel(client) // nothing marked: the selection stays
+	if c.text != "abc" || c.selection.Range != (TextInputRange{Start: 1, End: 3}) {
+		t.Fatal("cancel without a composition changed the document", c.text, c.selection)
+	}
+	client.SetMarkedText(nil, "にほｎ", TextInputRange{Start: 3, End: 3})
+	composition.Cancel(client)
+	composition.End(client)
+	if c.mark != nil || c.text != "a" {
+		t.Fatal("cancelled composition was kept", c.text, c.mark)
+	}
+	client.SetMarkedText(nil, "にほん", TextInputRange{Start: 3, End: 3})
+	composition.Replace(client, nil, "日本")
+	composition.End(client)
+	if c.mark != nil || c.text != "a日本" {
+		t.Fatal("commit after a cancel", c.text, c.mark)
 	}
 }
 

@@ -15,6 +15,11 @@ func activateMenu(w *mygo.Window, path ...string) (err error) {
 	return err
 }
 
+func menuItemEnabled(w *mygo.Window, path ...string) (enabled bool, err error) {
+	mygo.RunOnMain(func() { enabled, err = linux.TestMenuItemEnabled(w.NativeHandle(), path...) })
+	return enabled, err
+}
+
 // Key presses and dialogs need an input device under Xvfb; not covered.
 func pressShortcut(string, bool) (bool, bool) { return false, false }
 
@@ -75,12 +80,18 @@ func drag(w *mygo.Window, points [][2]float64) bool {
 	return fake(func() bool { return linux.TestDragSurface(w.NativeHandle(), points) })
 }
 
+// wheel turns the mouse's wheel a notch down at (x, y), through XTEST.
+func wheel(w *mygo.Window, x, y float64) bool {
+	return fake(func() bool { return linux.TestWheelSurface(w.NativeHandle(), x, y) })
+}
+
 func webViewAttached(*mygo.Window) (bool, bool) { return false, false }
 
 // Collection behaviors and deactivating the app are macOS's.
 func collectionBehavior(*mygo.Window) (uint, bool)               { return 0, false }
 func deactivateApp() bool                                        { return false }
 func material(*mygo.Window) (string, int, float64, bool, bool)   { return "", 0, 0, false, false }
+func materialState(*mygo.Window) (int, bool)                     { return 0, false }
 func roundedBacking(*mygo.Window) (bool, float64, float64, bool) { return false, 0, 0, false }
 func appActive() (bool, bool)                                    { return false, false }
 
@@ -215,6 +226,8 @@ func failWebViews(int) bool { return false }
 // A Control-click is a secondary click on macOS only.
 func controlClick(*mygo.Window, float64, float64) bool { return false }
 
+func secondaryClickAsPrimary(*mygo.Window, float64, float64) bool { return false }
+
 // composeOver does what an input method that edits typed text does through
 // GTK: it deletes the text around the caret it composes over, then
 // composes or commits.
@@ -305,6 +318,11 @@ func popupMenus() (menus [][]string, supported bool) {
 func choosePopupItem(label string) (ok bool) {
 	mygo.RunOnMain(func() { ok = linux.TestChoosePopupItem(label) })
 	return ok
+}
+
+func popupItemEnabled(label string) (enabled, ok bool) {
+	mygo.RunOnMain(func() { enabled, ok = linux.TestPopupItemEnabled(label) })
+	return enabled, ok
 }
 
 // Only macOS has key-value observing.
@@ -404,3 +422,13 @@ func dismissPageMenu() { mygo.RunOnMain(linux.TestDismissPageMenu) }
 
 // Only Windows' tests start a process that takes the foreground.
 func takeForeground(*mygo.Window) {}
+
+// pressLetter presses the key of an uppercase letter, with Ctrl held when
+// cmd is set, like a keyboard.
+func pressLetter(_ *mygo.Window, letter byte, cmd bool) bool {
+	key := string(rune(letter - 'A' + 'a'))
+	if cmd {
+		return pressKeys("Control_L", key)
+	}
+	return pressKeys(key)
+}

@@ -169,4 +169,22 @@ export const showcase: ShowcaseApp[] = [
     mode: "native",
     image: "/showcase/lumilo.jpg",
   },
+  {
+    name: "Tomoru",
+    description:
+      "Live bilingual subtitles for anything you watch on macOS and Windows. It listens to what your computer plays, from raw anime and VTuber streams to games and meetings, and shows each line with its translation over any app.",
+    url: "https://tomoru.acane.dev",
+    author: "ACAne0320",
+    mode: "native",
+    image: "/showcase/tomoru.jpg",
+  },
+  {
+    name: "Quaver Astra",
+    description:
+      "A lightweight, native-feeling QQ Music client. Team Quaver rebuilt their Electron app, Quaver Music, on MyGo, keeping its Go backend and playback engine.",
+    url: "https://quaver.0w0.red",
+    author: "Ne0W0r1d x Team Quaver",
+    mode: "native",
+    image: "/showcase/quaver-astra.webp",
+  },
 ]

@@ -454,7 +454,6 @@ func TestTimeMicrosecondTicks(t *testing.T) {
 	}
 }
 
-
 func TestLogScale(t *testing.T) {
 	l := NewLog(1, 1000)
 	for _, c := range []struct {
@@ -493,7 +492,6 @@ func TestLogTicks(t *testing.T) {
 	}
 }
 
-
 func TestAxisTitles(t *testing.T) {
 	ticks := []Tick{{At: 0.5, Value: 1, Label: "1"}}
 	tt := ui.NewTester(func(c *ui.Context) {
@@ -507,4 +505,3 @@ func TestAxisTitles(t *testing.T) {
 		t.Fatalf("the ticks went with the titles: %v", tt.Texts())
 	}
 }
-

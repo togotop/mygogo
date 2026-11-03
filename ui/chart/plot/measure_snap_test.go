@@ -12,7 +12,7 @@ import (
 // A marker snaps to the sample it is nearest, so a period is a whole
 // number of samples and the readout is exact.
 func TestMeasureSnapsToSamples(t *testing.T) {
-	ch, tt := measureChart(t) // 101 samples at 1 apart
+	ch, tt := measureChart(t)        // 101 samples at 1 apart
 	from := chartX(ch, ch.mA) + 23.4 // between samples
 	tt.Move(from, ch.r.Y+ch.r.H/2)
 	tt.Press(from, ch.r.Y+ch.r.H/2)
@@ -52,4 +52,3 @@ func TestMarkersKeepTheirPlaceInAFollowingView(t *testing.T) {
 		t.Fatalf("the marker moved from %g to %g of the view", before, after)
 	}
 }
-

@@ -290,10 +290,10 @@ func (a *Application) prepareQuit() bool {
 // finish runs once after the event loop has stopped.
 func (a *Application) finish() {
 	a.finished.Do(func() {
-			a.ended = true
-			a.checkpoint()
-			a.setLifecycle(LifecycleStopped)
-			stopNativeCalls()
+		a.ended = true
+		a.checkpoint()
+		a.setLifecycle(LifecycleStopped)
+		stopNativeCalls()
 		stopFileWatches()
 		clipboardStopped = true
 		backend().Clipboard().Close()

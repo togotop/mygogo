@@ -29,23 +29,30 @@ path, err := mygo.Dialog.Save(mygo.SaveDialogOptions{
 
 // Ask a question.
 res, err := mygo.Dialog.Message(mygo.MessageOptions{
-	Parent:        win,
-	Type:          mygo.MessageWarning,
-	Message:       "Delete 3 notes?",
-	Detail:        "You cannot undo this.",
-	Buttons:       []string{"Delete", "Cancel"},
-	CheckboxLabel: "Don't ask again",
+	Parent:             win,
+	Type:               mygo.MessageWarning,
+	Message:            "Delete 3 notes?",
+	Detail:             "You cannot undo this.",
+	Buttons:            []string{"Cancel", "Delete"},
+	DestructiveButtons: []int{1},
+	CheckboxLabel:      "Don't ask again",
 })
-if res.Button == 0 { /* Delete */ }
+if res.Button == 1 { /* Delete */ }
 
 // Report an error.
 mygo.Dialog.Error("Import failed", err.Error())
 ```
 
 `OpenDialogOptions` also pick directories (`Directory`), show hidden files
-and, on macOS, a message and a New Folder button. In message dialogs Enter
-activates `DefaultButton` and Escape `CancelButton`, by default the first
-button labeled Cancel or No.
+and, on macOS, a message and a New Folder button.
+
+In message dialogs Enter activates `DefaultButton` and Escape
+`CancelButton`, also when they are one button, as Cancel above. On macOS
+Cmd+. cancels too, and a `DefaultButton` of -1 leaves Enter to no button.
+`CancelButton` defaults to the first button labeled Cancel or No, else to
+the first button. For Delete / Keep, set `CancelButton: 1` to choose Keep;
+otherwise Escape chooses Delete. `DestructiveButtons` sets apart buttons
+that delete or can't be undone.
 
 ## Notifications
 
@@ -67,7 +74,9 @@ desktop's notification service, Windows as notification-area balloons.
 `Show` returns once the system has the notification. On macOS the first
 one asks the user whether to allow notifications, and `Show` waits for the
 answer; it returns `mygo.ErrNotificationsDenied` when they are not allowed,
-by that answer or later in System Settings.
+by that answer or later in System Settings. `ShowContext(ctx)` stops
+waiting when `ctx` is done, as an app quits with the question still open,
+and takes away a notification that the answer lets through after that.
 
 macOS keeps a notification in Notification Center after it is clicked,
 until the app removes it: `Close` it in `OnClick` to take it away, or call
@@ -107,6 +116,26 @@ mygo.NewNotification(mygo.NotificationOptions{
 	Group: "ada",
 	Title: "Ada",
 	Body:  msg.Text,
+}).Show()
+```
+
+`Image` shows an image with the notification, the bytes of a PNG or JPEG,
+such as the cover of the track that started playing. macOS attaches it,
+as a thumbnail that grows as the notification expands; Linux gives the
+desktop's notification service its pixels, scaled down to fit 256 pixels;
+Windows shows it as the balloon's large icon, in place of the app's. An
+image the system cannot decode leaves the notification without one.
+`NewNotification` copies it, so the app can reuse its buffer; MyGo does
+not fetch remote images:
+
+```go
+// One notification for what plays, replaced as the track changes.
+mygo.NewNotification(mygo.NotificationOptions{
+	ID:     "now-playing",
+	Title:  track.Title,
+	Body:   track.Artist + " — " + track.Album,
+	Image:  track.Cover,
+	Silent: true,
 }).Show()
 ```
 
@@ -213,6 +242,15 @@ content type from the icon theme, and for a desktop entry (`.desktop`), the
 icon of its application, or where the theme has none, that of desktop
 entries.
 
+`TypeIcon` returns the icon of a file type, by its extension, with or
+without the dot, without a file of that type on disk: the icon of an
+attachment not yet downloaded, say. It is drawn as `FileIcon` draws its
+icon, and fails in browsers.
+
+```go
+png, err := mygo.Shell.TypeIcon("pdf", 64)
+```
+
 `InstalledApps` lists the applications installed on the computer, sorted
 by name, as a launcher shows them, and `LaunchApp` starts one, or brings
 it to the front:
@@ -263,6 +301,14 @@ mygo.Screen.OnDisplaysChanged(func() { /* rearrange windows */ })
 ```
 
 `WorkArea` leaves out the menu bar, the Dock and taskbars.
+
+On Windows, displays can have different scales. Each display's
+coordinates start at its top-left corner in pixels divided by the
+smallest scale of the displays, and go on in its own scale, so that
+displays never overlap: one with a larger scale than another's leaves a
+gap after it. Where every display has the same scale, coordinates are
+the pixels divided by that scale. A window's bounds are in the scale of
+the display it is the most on.
 `DisplayMatching(rect)` returns the display a rectangle overlaps most, the
 one a window is on.
 

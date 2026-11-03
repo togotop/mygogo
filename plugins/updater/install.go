@@ -66,7 +66,11 @@ func (u *updater) installUpdate(ctx context.Context, version string) error {
 			defer stop()
 			s.set(s.t.checkingView())
 			r, err := check(s.ctx)
-			u.checked(err)
+			found := ""
+			if r != nil {
+				found = r.version
+			}
+			u.checked(err, found, s.User())
 			if err == nil && (r == nil || r.version != version) {
 				err = errors.New("updater: release changed; check updates again")
 			}

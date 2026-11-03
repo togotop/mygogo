@@ -357,6 +357,10 @@ const (
 	// "italic", "underline", "strikethrough", "alignLeft", "alignCenter"
 	// or "alignRight".
 	SurfaceCommand
+	// SurfaceCommandEnabled asks whether SurfaceCommand with Text would
+	// act now, for a menu to enable its item: WindowHandler.SurfaceEvent
+	// reports it.
+	SurfaceCommandEnabled
 	// FileDragOver reports files of another app dragged over X, Y, and
 	// FileDragLeave that they left. FileDrop drops Files at X, Y.
 	// WindowHandler.SurfaceEvent returns whether the content takes them
@@ -405,6 +409,13 @@ const (
 	// the surface has the keyboard again, and the content moves the focus
 	// on from the web view's element.
 	WebViewTabOut
+	// WebViewKey reports Key with Mods, pressed in the page of WebView,
+	// which has the keyboard, and which the page left unhandled: it did
+	// not cancel it, type it into an editable element or compose with it,
+	// and it is neither Tab nor a modifier key on its own. The content
+	// takes it as if the web view's element had the focus, and the
+	// keyboard stays with the page.
+	WebViewKey
 )
 
 // DrawableSurface observes native drawable presentation (Metal on iOS).
@@ -420,6 +431,13 @@ const (
 	PointerTouch
 	PointerPen
 )
+
+// EditCommands are the menu roles of edit commands, which native UI takes as
+// a SurfaceCommand and answers SurfaceCommandEnabled for.
+var EditCommands = map[string]bool{
+	"undo": true, "redo": true, "cut": true, "copy": true, "paste": true, "pasteAndMatchStyle": true,
+	"delete": true, "selectAll": true,
+}
 
 // SurfaceEvent is input on a Surface, or a change of it.
 type SurfaceEvent struct {
@@ -469,7 +487,7 @@ type SurfaceEvent struct {
 	// ID and Action are AccessAction's.
 	ID     uint64
 	Action AccessActionKind
-	// WebView is WebViewTabOut's.
+	// WebView is WebViewTabOut's and WebViewKey's.
 	WebView WebView
 	// Paced marks a SurfaceFrame of frames following each other at the
 	// display's refreshes (PacedSurface): the content may draw it later,

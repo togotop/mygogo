@@ -144,9 +144,11 @@ func columnsRing(s *Series, vx Range, px int, xs []float64, lo, hi []float32) ([
 		p -= yn
 	}
 	col := func(i int) int { return int(math.Floor((s.XAt(i) - vx.Lo) * scale)) }
-	next := func() { if p++; p == yn {
-		p = 0
-	} }
+	next := func() {
+		if p++; p == yn {
+			p = 0
+		}
+	}
 	for i := from; i < to; {
 		if y[p] != y[p] { // NaN breaks the line
 			i++
