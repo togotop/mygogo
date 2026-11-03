@@ -166,6 +166,8 @@ components, from buttons to tables.
   such as Accessibility and Screen Recording, checked and asked for, and a
   guide to System Settings with the app to drag into its list.
 
+- [Device](plugins/device.md): what the app runs on — the maker, the model,
+  the system and its version.
 - [Bluetooth](plugins/bluetooth.md): scan for Bluetooth LE devices, and read,
   write and subscribe to the characteristics of one.
 - [NFC](plugins/nfc.md): read the tags a phone is held against, write text to
