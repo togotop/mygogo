@@ -395,6 +395,7 @@ if it imports it, with its usage descriptions and permissions added to the app:
 | `preferences` | Small values kept between runs, on every platform |
 | `sqlite` | SQLite with full-text search, 64-bit, compiled into the app |
 | `background` | Go code that runs while the app isn't open, as the system finds the time: BGTaskScheduler and WorkManager |
+| `audio` | The media volume, the ringer and the transport keys (Android) |
 | `device` | What the app runs on: the maker, the model, the system (Android) |
 | `bluetooth` | Bluetooth LE: scanning, GATT reads, writes and notifications (Android) |
 | `nfc` | The tags a phone is held against, written to and spoken to in their own protocol (Android) |

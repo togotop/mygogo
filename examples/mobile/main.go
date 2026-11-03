@@ -20,6 +20,7 @@ import (
 
 	"github.com/egoist/mygo"
 	"github.com/egoist/mygo/audio"
+	media "github.com/egoist/mygo/plugins/audio"
 	"github.com/egoist/mygo/plugins/background"
 	"github.com/egoist/mygo/plugins/biometrics"
 	"github.com/egoist/mygo/plugins/bluetooth"
@@ -463,6 +464,26 @@ func (a *app) system(c *ui.Context) {
 						return err.Error()
 					}
 					return fmt.Sprintf("%s, online %v, metered %v, constrained %v", p.Interface, p.Online, p.Expensive, p.Constrained)
+				})
+				row("Lower the volume", func(ctx context.Context) string {
+					if err := media.Adjust(ctx, -1); err != nil {
+						return err.Error()
+					}
+					v, err := media.Current(ctx)
+					if err != nil {
+						return err.Error()
+					}
+					return fmt.Sprintf("%d%% (ringer %s)", v.Percent, v.Ringer)
+				})
+				row("Ask for silent", func(ctx context.Context) string {
+					err := media.SetRinger(ctx, media.RingerSilent)
+					switch {
+					case errors.Is(err, media.ErrDndAccess):
+						return "the system wants the do not disturb access"
+					case err != nil:
+						return err.Error()
+					}
+					return "the ringer is silent"
 				})
 				row("Say it aloud", func(ctx context.Context) string {
 					if err := speech.Speak(ctx, "Hello from MyGo", speech.Options{}); err != nil {

@@ -166,6 +166,8 @@ components, from buttons to tables.
   such as Accessibility and Screen Recording, checked and asked for, and a
   guide to System Settings with the app to drag into its list.
 
+- [Audio](plugins/audio.md): the phone's media volume, its ringer, and the
+  transport keys of whatever is playing.
 - [Device](plugins/device.md): what the app runs on — the maker, the model,
   the system and its version.
 - [Bluetooth](plugins/bluetooth.md): scan for Bluetooth LE devices, and read,
