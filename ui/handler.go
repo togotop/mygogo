@@ -57,6 +57,9 @@ const (
 	// with Ctrl held comes as InputZoom too, and a mouse wheel's notches
 	// as InputScroll with Ctrl in Mods.
 	InputZoom
+	// InputPointerCancel aborts a press taken by this handler, as the
+	// system does when it takes the pointer for a gesture of its own.
+	InputPointerCancel
 )
 
 // InputEvent is input an element takes as it comes (HandleInput).
