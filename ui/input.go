@@ -54,6 +54,11 @@ func (rt *engine) event(ev platform.SurfaceEvent) (taken bool) {
 	case platform.SurfaceFrame:
 		rt.surfaceFrame()
 	case platform.SurfaceResize:
+		// The content moved under a finger that is down: what it held, a
+		// press or a selection, ends where it was.
+		if rt.touch.down {
+			rt.cancelTouch()
+		}
 		rt.requestFrame()
 	case platform.SurfaceShown:
 		// A video goes on from where it stood out of sight.
@@ -113,6 +118,11 @@ func (rt *engine) event(ev platform.SurfaceEvent) (taken bool) {
 		rt.blinkStart = rt.now()
 		rt.focusChanged()
 	case platform.SurfaceBlur:
+		// The window lost the keyboard: a finger that was down is no longer
+		// the system's to report, so what it held ends.
+		if rt.touch.down {
+			rt.cancelTouch()
+		}
 		rt.windowFocused = false
 		rt.selection.dragging = false
 		// Keys let go of elsewhere never come back up here.

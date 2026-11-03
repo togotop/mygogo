@@ -60,6 +60,17 @@ const (
 	// InputPointerCancel aborts a press taken by this handler, as the
 	// system does when it takes the pointer for a gesture of its own.
 	InputPointerCancel
+	// InputLongPress starts a stationary touch selection on an element that
+	// takes text itself (TouchSelection): the moves and the release that
+	// follow come to it as InputPointerMove and InputPointerUp, and the
+	// keyboard stays away.
+	InputLongPress
+	// InputTextReplace replaces the runes From to To of the text an element
+	// describes to input methods (TextContext).
+	InputTextReplace
+	// InputSelection moves the caret of that text to From, selecting up to
+	// To.
+	InputSelection
 )
 
 // InputEvent is input an element takes as it comes (HandleInput).
@@ -76,6 +87,9 @@ type InputEvent struct {
 	// rune of an InputCompose's caret.
 	Text  string
 	Caret int
+	// From and To are the runes of a text an element describes (TextContext)
+	// that InputTextReplace replaces or InputSelection selects.
+	From, To int
 	// X and Y locate the pointer relative to the element's box.
 	X, Y float32
 	// Button is 0 for the primary button, 1 the secondary and 2 the
@@ -121,6 +135,15 @@ func (e *node) HandleInput(fn func(ev InputEvent) bool) *node {
 // InputText and Compose events (HandleInput) bring the text.
 func (e *node) TextCaret(r Rect) *node {
 	e.caret, e.takesText = r, true
+	return e
+}
+
+// TouchSelection makes a finger held still on the element start a selection
+// of the text it takes itself (HandleInput with TextCaret): it hears
+// InputLongPress, then the finger's moves and its release, as a drag's, and
+// the keyboard does not open. A tap still focuses it as it would.
+func (e *node) TouchSelection() *node {
+	e.touchSelection = true
 	return e
 }
 

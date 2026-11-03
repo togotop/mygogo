@@ -353,7 +353,10 @@ type node struct {
 	caret      Rect
 	takesText  bool
 	noIME      bool // InputMethod(false)
-	copyData   func(parts []SelectedText) transfer.Data
+	// touchSelection asks for a long press on the element to start a
+	// selection of the text it takes itself (TouchSelection).
+	touchSelection bool
+	copyData       func(parts []SelectedText) transfer.Data
 
 	// Content.
 	spans    []Span // of a RichText

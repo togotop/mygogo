@@ -143,8 +143,14 @@ type touchPan struct {
 	axes   Orientation
 	// holds is the element waiting for a long press; dragging says a long
 	// press gave the finger to the mouse's handling, to drag what it holds.
-	holds    uint64
-	dragging bool
+	holds uint64
+	// selecting says a long press started a selection of sel's own text,
+	// which the finger's moves go to until it lifts; selWait says the finger
+	// went down on such text and has not decided yet, and presses it on a tap.
+	selecting bool
+	sel       uint64
+	selWait   bool
+	dragging  bool
 	// edge says it swipes back from the screen's edge.
 	edge bool
 	// aimX and aimY are how far from the finger what it took is (aimTouch).
@@ -196,6 +202,13 @@ func (rt *engine) touchEvent(ev platform.SurfaceEvent, x, y float32) bool {
 			return true
 		}
 		t.holds = rt.longPressTarget(x, y)
+		if s := rt.states[t.holds]; s != nil && s.touchSelection {
+			// Text the element takes itself: the press waits, as a scroller's
+			// does, and only a tap presses it. A hold selects instead.
+			t.selWait, t.clicks = true, ev.Clicks
+			rt.requestFrame()
+			return true
+		}
 		if rt.overScroller(x, y) {
 			t.waiting, t.clicks = true, ev.Clicks
 			rt.requestFrame()
@@ -209,6 +222,10 @@ func (rt *engine) touchEvent(ev platform.SurfaceEvent, x, y float32) bool {
 		}
 		if rt.touchText.held != handleNone {
 			rt.dragHandle(x, y)
+			return true
+		}
+		if t.selecting {
+			rt.selectMove(t, x, y)
 			return true
 		}
 		if t.swallow {
@@ -225,9 +242,9 @@ func (rt *engine) touchEvent(ev platform.SurfaceEvent, x, y float32) bool {
 		if !t.panning {
 			dx, dy := x-t.x0, y-t.y0
 			if math.Hypot(float64(dx), float64(dy)) < touchSlop {
-				return t.waiting
+				return t.waiting || t.selWait
 			}
-			t.holds = 0
+			t.holds, t.selWait = 0, false
 			axis := Vertical
 			if abs32(dx) > abs32(dy) {
 				axis = Horizontal
@@ -281,6 +298,21 @@ func (rt *engine) touchEvent(ev platform.SurfaceEvent, x, y float32) bool {
 			}
 			rt.requestFrame()
 			return true
+		}
+		if was.selecting {
+			if s := rt.states[was.sel]; s != nil {
+				lx, ly := s.local(x, y)
+				rt.deliver(s, InputEvent{Kind: InputPointerUp, Button: 0, X: lx, Y: ly, Mods: rt.mods})
+			}
+			rt.requestFrame()
+			return true
+		}
+		if was.selWait && !was.panning && was.holds != 0 {
+			// A tap quicker than the hold: it presses, and lets go, as over a
+			// scroller's content.
+			rt.pressNow(was)
+			rt.afterTap(&was)
+			return false
 		}
 		if was.swallow {
 			return true
@@ -384,6 +416,13 @@ func (rt *engine) cancelTouch() {
 	t := &rt.touch
 	was := *t
 	*t = touchPan{}
+	if was.selecting {
+		// The system took the finger: the element's selection ends, and it
+		// hears it, as a press does.
+		if s := rt.states[was.sel]; s != nil {
+			rt.deliver(s, InputEvent{Kind: InputPointerCancel, Button: 0, Mods: rt.mods})
+		}
+	}
 	rt.releaseCaught(&was)
 	if rt.touchText.held != handleNone {
 		rt.touchText.held = handleNone
@@ -895,7 +934,7 @@ func (rt *engine) longPressTarget(x, y float32) uint64 {
 		if s == nil || s.flags&flagDisabled != 0 {
 			continue
 		}
-		if s.longPress || s.drags() || s.flags&(flagContextMenu|flagEditable|flagSelectable) != 0 {
+		if s.longPress || s.drags() || s.touchSelection || s.flags&(flagContextMenu|flagEditable|flagSelectable) != 0 {
 			return id
 		}
 	}
@@ -912,6 +951,13 @@ func (rt *engine) longPress(t *touchPan) {
 	rt.haptic("medium")
 	x, y := t.lx, t.ly
 	switch {
+	case s.touchSelection:
+		// Text the element takes itself: the finger's moves and its release
+		// select it, as its own handler says, and the keyboard stays away.
+		t.selWait, t.selecting, t.sel = false, true, s.id
+		lx, ly := s.local(x, y)
+		rt.deliver(s, InputEvent{Kind: InputLongPress, Button: 0, X: lx, Y: ly})
+		rt.requestFrame()
 	case s.longPress:
 		s.longPressed = true
 		// It takes the press: no click as the finger lifts.
@@ -940,6 +986,19 @@ func (rt *engine) longPress(t *touchPan) {
 		rt.pointerDown(x, y, 1, rt.mods, 1)
 		rt.pointerUp(1, 1)
 	}
+}
+
+// selectMove moves a selection a long press started: the element hears the
+// pointer's moves as it does a press's, without one, in its own box.
+func (rt *engine) selectMove(t *touchPan, x, y float32) {
+	s := rt.states[t.sel]
+	if s == nil {
+		t.selecting = false
+		return
+	}
+	lx, ly := s.local(x, y)
+	rt.deliver(s, InputEvent{Kind: InputPointerMove, Button: 0, X: lx, Y: ly, Mods: rt.mods})
+	rt.requestFrame()
 }
 
 // haptic plays a feel of the system's, on a device that has them.

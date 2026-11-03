@@ -798,6 +798,9 @@ type state struct {
 	caret       Rect
 	takesText   bool
 	noIME       bool
+	// touchSelection asks for a long press to start a selection of the text
+	// the element takes itself (TouchSelection).
+	touchSelection bool
 	// traits describe the element's text to on-screen keyboards, as this
 	// frame set them.
 	traits platform.TextTraits
