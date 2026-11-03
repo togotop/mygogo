@@ -1,0 +1,16 @@
+{
+  "mobile": {
+    "id": "bluetooth",
+    "android": {
+      "sources": ["android/*.kt"],
+      "class": "BluetoothPlugin",
+      "permissions": [
+        "BLUETOOTH",
+        "BLUETOOTH_ADMIN",
+        "ACCESS_FINE_LOCATION",
+        "BLUETOOTH_SCAN",
+        "BLUETOOTH_CONNECT"
+      ]
+    }
+  }
+}
