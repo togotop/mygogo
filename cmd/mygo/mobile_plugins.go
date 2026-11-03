@@ -28,7 +28,8 @@ import (
 //			"sources": ["android/*.kt"], "class": "LocationPlugin",
 //			"permissions": ["ACCESS_FINE_LOCATION"],
 //			"dependencies": ["androidx.biometric:biometric:1.1.0"],
-//			"application": ["<service android:name=\"...\" />"]
+//			"application": ["<service android:name=\"...\" />"],
+//			"resources": ["android/res"]
 //		}
 //	}}
 //
@@ -65,6 +66,9 @@ type pluginAndroid struct {
 	Dependencies []string `json:"dependencies"`
 	// Application are XML fragments the manifest's <application> takes.
 	Application []string `json:"application"`
+	// Resources are directories of res/ files the plugin brings: layouts,
+	// drawables, XML, whose paths under them are kept.
+	Resources []string `json:"resources"`
 }
 
 // mobilePlugins are the plugins of an app, in the order of their ids.
@@ -218,6 +222,74 @@ func (ps mobilePlugins) writeKotlin(dir string) error {
 	}
 	reg.WriteString("}\n")
 	return writeIfChanged(filepath.Join(dir, "PluginRegistry.kt"), []byte(reg.String()))
+}
+
+// writeResources copies what the app's plugins bring of Android's resources
+// into dir, the host's res: the layouts, drawables and XML a widget or a tile
+// draws, whose paths under android.resources are kept. They go beside the
+// Kotlin that names them, so that its dev.mygo.R sees them, and the module's
+// resources merge into the app's.
+//
+// Two plugins writing one file would have one silently overwrite the other,
+// which is an error instead. What a build brings is written down, as the
+// project is not rebuilt from scratch: a file a plugin no longer brings goes.
+func (ps mobilePlugins) writeResources(dir string) error {
+	manifest := filepath.Join(dir, ".mygo-plugin-resources")
+	old := map[string]bool{}
+	if data, err := os.ReadFile(manifest); err == nil {
+		for _, name := range strings.Fields(string(data)) {
+			old[name] = true
+		}
+	}
+	brought := map[string]string{}
+	var written []string
+	for _, p := range ps {
+		if p.Android == nil {
+			continue
+		}
+		for _, r := range p.Android.Resources {
+			root := filepath.Join(p.dir, filepath.FromSlash(r))
+			if _, err := os.Stat(root); err != nil {
+				return fmt.Errorf("%s: %w", p.ID, err)
+			}
+			err := filepath.WalkDir(root, func(path string, d fs.DirEntry, walkErr error) error {
+				if walkErr != nil {
+					return walkErr
+				}
+				if d.IsDir() {
+					return nil
+				}
+				rel, err := filepath.Rel(root, path)
+				if err != nil {
+					return err
+				}
+				if other, ok := brought[rel]; ok {
+					return fmt.Errorf("%s and %s both bring %s", other, p.ID, filepath.ToSlash(rel))
+				}
+				brought[rel] = p.ID
+				written = append(written, filepath.ToSlash(rel))
+				data, err := os.ReadFile(path)
+				if err != nil {
+					return err
+				}
+				out := filepath.Join(dir, rel)
+				if err := os.MkdirAll(filepath.Dir(out), 0o755); err != nil {
+					return err
+				}
+				return os.WriteFile(out, data, 0o644)
+			})
+			if err != nil {
+				return err
+			}
+		}
+	}
+	for name := range old {
+		if _, ok := brought[filepath.FromSlash(name)]; !ok {
+			os.Remove(filepath.Join(dir, filepath.FromSlash(name)))
+		}
+	}
+	slices.Sort(written)
+	return writeIfChanged(manifest, []byte(strings.Join(written, "\n")+"\n"))
 }
 
 // writeIfChanged leaves a file Gradle would rebuild alone if it stays as it is.

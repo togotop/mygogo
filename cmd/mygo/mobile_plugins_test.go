@@ -185,3 +185,44 @@ func TestBuiltForPhones(t *testing.T) {
 		t.Error("builtForPhones")
 	}
 }
+
+// A plugin's resources are the res files a widget or a tile draws: they land
+// under the project's res with their paths, and two plugins may not bring one
+// file.
+func TestMobilePluginResources(t *testing.T) {
+	write := func(root, name, s string) {
+		p := filepath.Join(root, name)
+		if err := os.MkdirAll(filepath.Dir(p), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(p, []byte(s), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	a, b := t.TempDir(), t.TempDir()
+	write(a, "android/res/layout/widget.xml", "<LinearLayout />")
+	write(a, "android/res/xml/widget_info.xml", "<info />")
+	ps := mobilePlugins{
+		{ID: "widget", dir: a, Android: &pluginAndroid{Resources: []string{"android/res"}}},
+	}
+	out := t.TempDir()
+	if err := ps.writeResources(out); err != nil {
+		t.Fatal(err)
+	}
+	for _, name := range []string{"layout/widget.xml", "xml/widget_info.xml"} {
+		if _, err := os.Stat(filepath.Join(out, name)); err != nil {
+			t.Errorf("%s: %v", name, err)
+		}
+	}
+
+	write(b, "res/layout/widget.xml", "<FrameLayout />")
+	ps = append(ps, &mobilePlugin{ID: "other", dir: b, Android: &pluginAndroid{Resources: []string{"res"}}})
+	if err := ps.writeResources(t.TempDir()); err == nil {
+		t.Error("two plugins may not bring one resource")
+	}
+
+	ps = mobilePlugins{{ID: "missing", dir: a, Android: &pluginAndroid{Resources: []string{"android/none"}}}}
+	if err := ps.writeResources(t.TempDir()); err == nil {
+		t.Error("a resources directory that is not there is an error")
+	}
+}

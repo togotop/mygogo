@@ -458,6 +458,9 @@ func (t *androidToolchain) gradle(ctx context.Context, c, dc *Config, dir, work,
 	if err != nil {
 		return err
 	}
+	if err := plugins.writeResources(filepath.Join(dir, "mygo", "src", "main", "res")); err != nil {
+		return err
+	}
 	if err := plugins.writeKotlin(filepath.Join(dir, "mygo", "src", "main", "java", "dev", "mygo")); err != nil {
 		return err
 	}
