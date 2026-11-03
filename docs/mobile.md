@@ -395,6 +395,12 @@ if it imports it, with its usage descriptions and permissions added to the app:
 | `preferences` | Small values kept between runs, on every platform |
 | `sqlite` | SQLite with full-text search, 64-bit, compiled into the app |
 | `background` | Go code that runs while the app isn't open, as the system finds the time: BGTaskScheduler and WorkManager |
+| `bluetooth` | Bluetooth LE: scanning, GATT reads, writes and notifications (Android) |
+| `nfc` | The tags a phone is held against, written to and spoken to in their own protocol (Android) |
+| `scanner` | A barcode or QR code read from a photo the system's camera takes, with no permission of the app (Android) |
+| `speech` | Text said aloud with the device's voice (Android) |
+| `tile` | The app's tile in the quick settings, whose presses come back to Go (Android) |
+| `widget` | The app's widget on the home screen, whose presses come back to Go (Android) |
 
 ## Writing a plugin
 
@@ -422,6 +428,12 @@ imports, compiles its code into the host and registers it:
   }
 }
 ```
+
+`resources` names directories of `res/` files the plugin brings: layouts, drawables
+and XML, which land in the host's res, so that its Kotlin's `dev.mygo.R` sees
+them and the app's resources merge with them. `manifest` names XML the app's
+manifest takes beside `<application>`, as the `<queries>` entry Android 11 and
+later need to reach a system service.
 
 Go calls it with JSON, and hears its events:
 

@@ -8,25 +8,35 @@ package main
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"log"
 	"math"
 	"path/filepath"
+	"slices"
+	"strings"
+	"sync"
 	"time"
 
 	"github.com/egoist/mygo"
 	"github.com/egoist/mygo/audio"
 	"github.com/egoist/mygo/plugins/background"
 	"github.com/egoist/mygo/plugins/biometrics"
+	"github.com/egoist/mygo/plugins/bluetooth"
 	"github.com/egoist/mygo/plugins/camera"
 	"github.com/egoist/mygo/plugins/imagepicker"
 	"github.com/egoist/mygo/plugins/location"
 	"github.com/egoist/mygo/plugins/maps"
+	"github.com/egoist/mygo/plugins/nfc"
 	"github.com/egoist/mygo/plugins/permissionflow"
 	"github.com/egoist/mygo/plugins/preferences"
+	"github.com/egoist/mygo/plugins/scanner"
 	"github.com/egoist/mygo/plugins/sensors"
+	"github.com/egoist/mygo/plugins/speech"
 	"github.com/egoist/mygo/plugins/sqlite"
+	"github.com/egoist/mygo/plugins/tile"
 	"github.com/egoist/mygo/plugins/videoplayer"
+	"github.com/egoist/mygo/plugins/widget"
 	"github.com/egoist/mygo/ui"
 	"github.com/egoist/mygo/ui/mobile"
 	"github.com/egoist/mygo/ui/netimage"
@@ -368,6 +378,102 @@ func (a *app) system(c *ui.Context) {
 						})
 					}()
 				}
+			})
+			mobile.Section(c, "Radios and codes", func() {
+				row := func(title string, run func(ctx context.Context) string) {
+					if mobile.ListRow(c.Key(title), mobile.RowOptions{Title: title, Subtitle: a.results[title]}).Clicked() {
+						go func() {
+							s := run(context.Background())
+							a.win.Update(func() { a.results[title] = s })
+						}()
+					}
+				}
+				row("Nearby Bluetooth LE", func(ctx context.Context) string {
+					var mu sync.Mutex
+					seen := map[string]string{}
+					scan, err := bluetooth.Scan(ctx, "", func(d bluetooth.Device) {
+						mu.Lock()
+						seen[d.Address] = d.Name
+						mu.Unlock()
+					})
+					if err != nil {
+						return err.Error()
+					}
+					// A scan keeps going: the list is what it found meanwhile.
+					time.Sleep(3 * time.Second)
+					scan.Stop()
+					mu.Lock()
+					defer mu.Unlock()
+					if len(seen) == 0 {
+						return "nothing in reach"
+					}
+					names := make([]string, 0, len(seen))
+					for _, n := range seen {
+						if n == "" {
+							n = "(no name)"
+						}
+						names = append(names, n)
+					}
+					slices.Sort(names)
+					return fmt.Sprintf("%d seen: %s", len(names), strings.Join(names, ", "))
+				})
+				row("Scan a QR code", func(ctx context.Context) string {
+					text, err := scanner.Scan(ctx, scanner.Options{Formats: []string{"qr"}})
+					if errors.Is(err, scanner.ErrCanceled) {
+						return "canceled"
+					}
+					if err != nil {
+						return err.Error()
+					}
+					return text
+				})
+				row("Read an NFC tag", func(ctx context.Context) string {
+					tag := make(chan nfc.Tag, 1)
+					scan, err := nfc.Scan(ctx, func(t nfc.Tag) {
+						select {
+						case tag <- t:
+						default:
+						}
+					})
+					if err != nil {
+						return err.Error()
+					}
+					defer scan.Stop()
+					select {
+					case t := <-tag:
+						if len(t.Records) == 0 {
+							return "a tag with nothing written on it"
+						}
+						r := t.Records[0]
+						switch r.Kind {
+						case "text":
+							return r.Text
+						case "uri":
+							return r.URI
+						}
+						return r.Kind
+					case <-time.After(10 * time.Second):
+						return "no tag held against it"
+					}
+				})
+				row("Say it aloud", func(ctx context.Context) string {
+					if err := speech.Speak(ctx, "Hello from MyGo", speech.Options{}); err != nil {
+						return err.Error()
+					}
+					return "the voice is saying it"
+				})
+				row("Set the tile", func(ctx context.Context) string {
+					if err := tile.Set(ctx, tile.Tile{Label: "Mobile", Subtitle: "hello", Active: true}); err != nil {
+						return err.Error()
+					}
+					return "pull the quick settings down"
+				})
+				row("Set the widget", func(ctx context.Context) string {
+					if err := widget.Set(ctx, widget.Widget{Title: "Mobile", Text: "hello from MyGo", Active: true}); err != nil {
+						return err.Error()
+					}
+					return "add it from the home screen"
+				})
 			})
 			mobile.Section(c, "Plugins with native code", func() {
 				row := func(title string, run func(ctx context.Context) string) {

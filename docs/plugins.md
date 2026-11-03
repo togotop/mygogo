@@ -38,6 +38,18 @@ JavaScript package whose functions call them. The app uses the Go half with
   the microphone: checked, asked for, and a guide to System Settings with
   the app to drag into its list, after PermissionFlow. It is all Go.
 
+- [Bluetooth](plugins/bluetooth.md): scan for Bluetooth LE devices, and read,
+  write and subscribe to the characteristics of one.
+- [NFC](plugins/nfc.md): read the tags a phone is held against, write text to
+  one, and speak a tag's own protocol with it.
+- [Scanner](plugins/scanner.md): read a barcode or QR code from a photo the
+  user takes with the system's camera, with no camera permission of the app's.
+- [Speech](plugins/speech.md): say text with the device's own voice, at a
+  rate, pitch and language.
+- [Tile](plugins/tile.md): the app's tile in Android's quick settings, whose
+  presses come back to Go.
+- [Widget](plugins/widget.md): the app's widget on Android's home screen.
+
 ## Using plugins
 
 `mygo.Use` takes the plugins of the app, before `App.Run`:

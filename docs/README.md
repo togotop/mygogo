@@ -166,6 +166,18 @@ components, from buttons to tables.
   such as Accessibility and Screen Recording, checked and asked for, and a
   guide to System Settings with the app to drag into its list.
 
+- [Bluetooth](plugins/bluetooth.md): scan for Bluetooth LE devices, and read,
+  write and subscribe to the characteristics of one.
+- [NFC](plugins/nfc.md): read the tags a phone is held against, write text to
+  one, and speak a tag's own protocol with it.
+- [Scanner](plugins/scanner.md): read a barcode or QR code from a photo the
+  user takes with the system's camera, with no camera permission of the app's.
+- [Speech](plugins/speech.md): say text with the device's own voice, at a
+  rate, pitch and language.
+- [Tile](plugins/tile.md): the app's tile in Android's quick settings, whose
+  presses come back to Go.
+- [Widget](plugins/widget.md): the app's widget on Android's home screen.
+
 ## Reference
 
 - [Configuration](configuration.md): `mygo.config.ts`, or `mygo.json`.
