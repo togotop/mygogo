@@ -1,0 +1,14 @@
+{
+  "mobile": {
+    "id": "tile",
+    "android": {
+      "sources": [
+        "android/*.kt"
+      ],
+      "class": "TilePlugin",
+      "application": [
+        "<service android:name=\"dev.mygo.MyGoTileService\" android:exported=\"true\" android:permission=\"android.permission.BIND_QUICK_SETTINGS_TILE\"><intent-filter><action android:name=\"android.service.quicksettings.action.QS_TILE\" /></intent-filter></service>"
+      ]
+    }
+  }
+}
