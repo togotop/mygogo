@@ -51,6 +51,9 @@ type Span struct {
 	// chemical formulas. The line makes room for it, and its underline
 	// and strikethrough go with it.
 	BaselineShift float32
+
+	// solid draws Underline through descenders, as a link's hover.
+	solid bool
 }
 
 // RichText creates a text whose spans differ in style, over the style of
@@ -362,7 +365,7 @@ func (sp *spanPaint) lines(p *Painter, l *text.Layout, li int, x, y float32, col
 			return
 		}
 		span := &sp.spans[k]
-		d := decoration{underline: span.Underline || span.WavyUnderline || span.DottedUnderline, wavy: span.WavyUnderline, dotted: span.DottedUnderline, strike: span.Strikethrough, color: base.color, thick: base.thick}
+		d := decoration{underline: span.Underline || span.WavyUnderline || span.DottedUnderline, wavy: span.WavyUnderline, dotted: span.DottedUnderline, strike: span.Strikethrough, solid: span.solid, color: base.color, thick: base.thick}
 		if !d.underline && !d.strike {
 			return
 		}

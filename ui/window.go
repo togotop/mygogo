@@ -103,6 +103,10 @@ func (v *Content) AttachContent(conn *surface.Conn) {
 	}
 	conn.Capture = h.capture
 	conn.Detach = h.detach
+	if conn.ContentSize != nil && conn.FitWidth != nil {
+		rt.fit = newFitter(conn.FitWidth, conn.ContentSize)
+		conn.Fit = h.fit
+	}
 	rt.insp.enabled = conn.DevTools
 	conn.ToggleDevTools = func() {
 		if rt.insp.enabled {
@@ -351,8 +355,8 @@ func (h *windowHost) event(ev platform.SurfaceEvent) bool {
 			if h.gpu != nil {
 				h.gpu.Release()
 				h.gpu = nil
-				h.gpuTried, h.retryAt = false, time.Time{}
 			}
+			h.gpuTried, h.retryAt = false, time.Time{}
 			h.requestFrame()
 		}
 		if touchSystem != nil {
@@ -360,9 +364,14 @@ func (h *windowHost) event(ev platform.SurfaceEvent) bool {
 		}
 		return false
 	}
-	if ev.Kind == platform.WebViewTabOut {
-		if i := slices.IndexFunc(h.placed, func(p platform.WebViewPlacement) bool { return p.WebView == ev.WebView }); i >= 0 {
+	if ev.Kind == platform.WebViewTabOut || ev.Kind == platform.WebViewKey {
+		i := slices.IndexFunc(h.placed, func(p platform.WebViewPlacement) bool { return p.WebView == ev.WebView })
+		switch {
+		case i < 0:
+		case ev.Kind == platform.WebViewTabOut:
 			h.rt.webViewTabOut(h.views[i], ev.Mods&platform.ModShift != 0)
+		default:
+			h.rt.webViewKey(h.views[i], Modifiers(ev.Mods), Key(ev.Key), Key(ev.PhysicalKey), ev.Repeat)
 		}
 		return false
 	}
@@ -721,6 +730,20 @@ func (h *windowHost) capture() (int, int, []byte) {
 	return img.W, img.H, img.RGBA()
 }
 
+// fit builds the frame that waits for the window to show, if one does,
+// for a window that takes its content's size to measure what it shows
+// now before it shows (surface.Conn.Fit), as capture does; the surface's
+// next frame draws it. It builds none within a frame, nor before the
+// first: the view runs as the window first draws, not within NewWindow.
+func (h *windowHost) fit() bool {
+	rt := h.rt
+	if h.detached || rt.inFrame || h.last == nil || !h.frameAsked && !rt.held {
+		return false
+	}
+	rt.runFrame()
+	return true
+}
+
 func (h *windowHost) detach() {
 	h.detached = true
 	if c := h.content; c != nil {
@@ -957,12 +980,13 @@ func (h *windowHost) placeWebViews(views []placedWebView) {
 	natives := make([]NativeWebView, 0, len(views))
 	for _, v := range views {
 		if n := v.v.SurfaceWebView(h.conn); n != nil {
-			list = append(list, platform.WebViewPlacement{WebView: n, Frame: v.frame, Clip: v.clip, Covers: v.covers})
+			list = append(list, v.placement(n))
 			natives = append(natives, v.v)
 		}
 	}
 	if slices.EqualFunc(list, h.placed, func(a, b platform.WebViewPlacement) bool {
-		return a.WebView == b.WebView && a.Frame == b.Frame && a.Clip == b.Clip && slices.Equal(a.Covers, b.Covers)
+		return a.WebView == b.WebView && a.Frame == b.Frame && a.Clip == b.Clip && a.Width == b.Width && a.Height == b.Height &&
+			a.Radii == b.Radii && slices.Equal(a.Covers, b.Covers)
 	}) {
 		return
 	}

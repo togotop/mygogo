@@ -14,7 +14,8 @@ func TestBasesHaveNoLook(t *testing.T) {
 	var radio, tab int
 	var value = 50.0
 	var size, text = "M", "hello"
-	open := true
+	open, menu, section := true, true, true
+	mixed := CheckMixed
 	tt := coreNewTester(func(c *context) {
 		th := *c.Theme()
 		th.Background = RGB(255, 255, 255)
@@ -22,6 +23,7 @@ func TestBasesHaveNoLook(t *testing.T) {
 		coreColumn(c).Fill().Padding(10).Gap(10).AlignItems(Start).Children(func() {
 			coreButtonBase(c).Size(60, 20)
 			coreCheckboxBase(c, &check).Size(60, 20)
+			coreCheckboxStateBase(c, &mixed).Size(60, 20)
 			coreSwitchBase(c, &on).Size(60, 20)
 			coreRadioBase(c, &radio, 1).Size(60, 20)
 			coreSliderBase(c, &value, 0, 100).Size(60, 20)
@@ -38,6 +40,20 @@ func TestBasesHaveNoLook(t *testing.T) {
 			})
 			coreTextInputBase(c, &text).Width(60).TextColor(RGB(255, 255, 255))
 			corePopoverBase(c, sel.Trigger, &open, func(panel *node) { coreBox(c).Size(30, 30) })
+			acc := coreAccordionBase(c)
+			acc.Root.Children(func() {
+				item := acc.Item(&section)
+				item.Trigger.Size(60, 20)
+				item.Panel(func() { coreBox(c).Size(60, 20) })
+			})
+			m := coreMenuBase(c, &menu)
+			m.Trigger.Size(60, 20)
+			m.Popup(func(panel *node) {
+				m.Item().Size(60, 20)
+				m.CheckItem(true).Size(60, 20)
+				sub := m.SubmenuItem().Size(60, 20)
+				m.Submenu(sub, func(panel *node) { m.RadioItem(true).Size(60, 20) })
+			})
 		})
 	}, 300, 400)
 	img := tt.Image()
@@ -213,6 +229,117 @@ func TestSelectBase(t *testing.T) {
 	tt.Click("item XL")
 	if size != "XL" || tt.HasText("item S") {
 		t.Errorf("a click chooses %q", size)
+	}
+}
+
+// TestSelectBaseDisabledItems checks that a disabled option is out of the
+// keys' way and of the pointer's, as a listbox's aria-disabled options.
+func TestSelectBaseDisabledItems(t *testing.T) {
+	sel := "a"
+	off := map[string]bool{"b": true, "d": true}
+	var highlighted, jump string
+	tt := coreNewTester(func(c *context) {
+		s := coreSelectBase(c, &sel)
+		s.Trigger.Label("trigger").Padding(4).Children(func() { coreText(c, "Choice: "+sel) })
+		if jump != "" {
+			s.Highlight(jump)
+			jump = ""
+		}
+		highlighted = ""
+		s.Popup(func(panel *node) {
+			for _, v := range []string{"a", "b", "c", "d"} {
+				it := s.Item(v).Padding(4).Label("opt-" + v)
+				it.Disabled(off[v])
+				if it.Highlighted() {
+					highlighted = v
+				}
+				it.Children(func() { coreText(c, v) })
+			}
+		})
+	}, 300, 300)
+	tt.Click("trigger")
+	tt.Key(0, KeyDown)
+	if highlighted != "c" {
+		t.Errorf("Down from a highlights %q, not c past the disabled b", highlighted)
+	}
+	tt.Key(0, KeyDown)
+	tt.Key(0, KeyEnd)
+	if highlighted != "c" {
+		t.Errorf("Down and End onto the disabled d highlight %q", highlighted)
+	}
+	tt.Key(0, KeyUp)
+	if highlighted != "a" {
+		t.Errorf("Up from c highlights %q, not a past the disabled b", highlighted)
+	}
+	tt.Key(0, KeyEnd)
+	tt.Key(0, KeyHome)
+	if highlighted != "a" {
+		t.Errorf("Home highlights %q", highlighted)
+	}
+	jump = "d"
+	tt.Frame()
+	if highlighted != "a" {
+		t.Errorf("Highlight of the disabled d highlights %q", highlighted)
+	}
+	tt.Key(0, KeyDown)
+	tt.Key(0, KeyEnter)
+	if sel != "c" {
+		t.Errorf("Down and Enter choose %q, not c", sel)
+	}
+	// The pointer neither highlights nor chooses a disabled option.
+	tt.Click("trigger")
+	r, _ := tt.Find("opt-b")
+	tt.Move(r.X+r.W/2, r.Y+r.H/2)
+	if highlighted != "c" {
+		t.Errorf("the pointer on the disabled b highlights %q", highlighted)
+	}
+	tt.Click("opt-b")
+	if sel != "c" || !tt.HasText("d") {
+		t.Errorf("a click on the disabled b chooses %q, popup open %v", sel, tt.HasText("d"))
+	}
+	tt.Key(0, KeyEscape)
+	// A disabled choice leaves the highlight on the first option that
+	// can be chosen.
+	sel = "b"
+	tt.Click("trigger")
+	if highlighted != "a" {
+		t.Errorf("the popup of the disabled choice b highlights %q, not a", highlighted)
+	}
+	tt.Key(0, KeyEscape)
+	// With every option disabled, nothing is highlighted or chosen.
+	off = map[string]bool{"a": true, "b": true, "c": true, "d": true}
+	tt.Click("trigger")
+	tt.Key(0, KeyDown)
+	tt.Key(0, KeyEnter)
+	if highlighted != "" || sel != "b" {
+		t.Errorf("with every option disabled, %q is highlighted and %q chosen", highlighted, sel)
+	}
+}
+
+// TestSelectBaseDisabledItemPublic is the same through the public API,
+// where the item is disabled after its constructor returned.
+func TestSelectBaseDisabledItemPublic(t *testing.T) {
+	sel := "a"
+	tt := NewTester(func(c *Context) {
+		s := SelectBase(c, &sel)
+		s.Trigger.Label("trigger").Children(func() { Text(c, sel) })
+		s.Popup(func(panel Element) {
+			for _, v := range []string{"a", "b", "c"} {
+				it := s.Item(v).Label("opt-" + v)
+				if v == "b" {
+					it.Disabled(true)
+				}
+				it.Children(func() { Text(c, v) })
+			}
+		})
+	}, 300, 300)
+	if err := tt.Click("trigger"); err != nil {
+		t.Fatal(err)
+	}
+	tt.Key(0, KeyDown)
+	tt.Key(0, KeyEnter)
+	if sel != "c" {
+		t.Errorf("Down and Enter choose %q, not c past the disabled b", sel)
 	}
 }
 

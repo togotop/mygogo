@@ -1,6 +1,9 @@
 package ui
 
-import "fmt"
+import (
+	"fmt"
+	"slices"
+)
 
 // Bases are widgets without a look. A base handles the pointer, the
 // keyboard and the focus, and tells assistive technology what it is,
@@ -38,6 +41,71 @@ func coreCheckboxBase(c *context, checked *bool) *node {
 		g.boxes = append(g.boxes, checked)
 	}
 	return toggle(c, checked, RoleCheckBox, "Checkbox")
+}
+
+// CheckState is what a check box that can be mixed shows
+// (CheckboxStateBase): unchecked, checked, or mixed, as one checking a
+// group whose boxes differ.
+type CheckState uint8
+
+const (
+	CheckOff CheckState = iota
+	CheckOn
+	CheckMixed
+)
+
+// CheckboxStateBase creates a check box without a look that can be mixed,
+// as a "select all" box in a table's header, checked when every row is
+// and mixed when some are: a row that sets *state to CheckOn when
+// clicked, or with Space while it has the focus, or to CheckOff when it
+// is CheckOn, which Changed reports, and that assistive technology sees
+// as a check box, checked, unchecked or mixed. Draw its box from *state;
+// CheckboxState is CheckboxStateBase with the theme's look.
+//
+//	all := ui.CheckOff
+//	switch n := app.selectedCount(); {
+//	case n == len(app.rows):
+//		all = ui.CheckOn
+//	case n > 0:
+//		all = ui.CheckMixed
+//	}
+//	cb := ui.CheckboxStateBase(c, &all).Label("Select all")
+//	cb.Children(func() { app.box(c, all) }) // a dash while mixed
+//	if cb.Changed() {
+//		app.selectAll(all == ui.CheckOn)
+//	}
+func coreCheckboxStateBase(c *context, state *CheckState) *node {
+	e := coreRow(c).Focusable().Shrink(0)
+	e.flags |= flagClickable | flagHover | flagToggle
+	e.widget, e.role = "Checkbox", RoleCheckBox
+	*valueBinding[*CheckState](e) = state
+	e.onValueInput(checkStateInput)
+	e.checked = checkedOf(*state)
+	return e
+}
+
+// checkedOf returns what assistive technology sees of a check box in
+// state s: off (1), on (2) or mixed (3), as node.checked holds.
+func checkedOf(s CheckState) int8 {
+	switch s {
+	case CheckOn:
+		return 2
+	case CheckMixed:
+		return 3
+	}
+	return 1
+}
+
+func checkStateInput(n *node) {
+	if n.Clicked() {
+		p := *valueBinding[*CheckState](n)
+		if *p == CheckOn {
+			*p = CheckOff
+		} else {
+			*p = CheckOn
+		}
+		n.st.markChanged()
+	}
 }
 
 // SwitchBase creates a switch without a look: CheckboxBase, which
@@ -246,14 +314,16 @@ type selectParts[T comparable] struct {
 	open     *bool
 	// highlight is the index of the option the pointer or the arrows are
 	// on, -1 until the popup finds the chosen one; values are the
-	// options of the last frame that showed them, and next those of this
-	// frame. pointer is where the pointer was when it last highlighted an
-	// option: it highlights another once it moves. shown is the option
-	// last scrolled into view as the highlight moved to it, while shows
-	// says whether it is one.
+	// options of the last frame that showed them, off whether each was
+	// disabled, and next and items those of this frame. pointer is where
+	// the pointer was when it last highlighted an option: it highlights
+	// another once it moves. shown is the option last scrolled into view
+	// as the highlight moved to it, while shows says whether it is one.
 	highlight *int
 	values    *[]T
+	off       *[]bool
 	next      []T
+	items     []*node
 	pointer   *[2]float32
 	shown     *T
 	shows     *bool
@@ -261,10 +331,11 @@ type selectParts[T comparable] struct {
 
 // SelectBase creates a select without a look: a trigger that opens a
 // popup of options, which choose *selected. With the focus on the
-// trigger, the arrows open the popup and move among its options, Enter
-// and Space choose one, and Escape closes it; the trigger's Changed
-// reports a new choice. Give the trigger children showing the choice, and
-// build the options in Popup with Item:
+// trigger, the arrows open the popup and move among its options, past
+// those disabled, as do Home and End; Enter and Space choose one, and
+// Escape closes it; the trigger's Changed reports a new choice. Give the
+// trigger children showing the choice, and build the options in Popup
+// with Item:
 //
 //	sel := ui.SelectBase(c, &app.size)
 //	sel.Trigger.Padding(6, 10).Border(1, gray).Children(func() {
@@ -290,6 +361,7 @@ func coreSelectBase[T comparable](c *context, selected *T) *selectParts[T] {
 		open:      coreLocal(b, "open", func() bool { return false }),
 		highlight: coreLocal(b, "highlight", func() int { return -1 }),
 		values:    coreLocal(b, "values", func() []T { return nil }),
+		off:       coreLocal(b, "off", func() []bool { return nil }),
 		pointer:   coreLocal(b, "pointer", func() [2]float32 { return [2]float32{} }),
 		shown:     coreLocal(b, "shown", func() T { var zero T; return zero }),
 		shows:     coreLocal(b, "shows", func() bool { return false }),
@@ -303,9 +375,16 @@ func coreSelectBase[T comparable](c *context, selected *T) *selectParts[T] {
 		if b.Clicked() {
 			open(!*s.open)
 		}
-		n := len(*s.values)
-		move := func(i int) {
-			*s.highlight = max(0, min(i, n-1))
+		n, off := len(*s.values), *s.off
+		// move highlights the first option from i on, going by d, that
+		// is not disabled, if there is one.
+		move := func(i, d int) {
+			for ; i >= 0 && i < n; i += d {
+				if !off[i] {
+					*s.highlight = i
+					break
+				}
+			}
 			c.rt.consumed = true
 		}
 		if !*s.open {
@@ -315,15 +394,15 @@ func coreSelectBase[T comparable](c *context, selected *T) *selectParts[T] {
 		} else if n > 0 {
 			switch {
 			case b.Shortcut(0, KeyDown):
-				move(*s.highlight + 1)
+				move(max(*s.highlight+1, 0), 1)
 			case b.Shortcut(0, KeyUp):
-				move(*s.highlight - 1)
+				move(max(*s.highlight-1, 0), -1)
 			case b.Shortcut(0, KeyHome):
-				move(0)
+				move(0, 1)
 			case b.Shortcut(0, KeyEnd):
-				move(n - 1)
+				move(n-1, -1)
 			case b.Shortcut(0, KeyEnter), b.Shortcut(0, KeySpace):
-				if h := *s.highlight; h >= 0 && h < n {
+				if h := *s.highlight; h >= 0 && h < n && !off[h] {
 					s.choose((*s.values)[h])
 				}
 			}
@@ -346,12 +425,12 @@ func (s *selectParts[T]) choose(v T) {
 func (s *selectParts[T]) Open() bool { return *s.open }
 
 // Highlight moves the highlight to the option of value while the popup
-// shows, as a select of your own may do as the user types the option's
-// first letters; Enter then chooses it.
+// shows, unless it is disabled, as a select of your own may do as the
+// user types the option's first letters; Enter then chooses it.
 func (s *selectParts[T]) Highlight(value T) {
 	for i, v := range *s.values {
 		if v == value {
-			if *s.highlight != i {
+			if *s.highlight != i && !(*s.off)[i] {
 				*s.highlight = i
 				s.c.rt.consumed = true
 			}
@@ -368,26 +447,50 @@ func (s *selectParts[T]) Popup(fn func(panel *node)) *node {
 	b := s.Trigger
 	return popover(s.c, b, s.open, true, func(panel *node) {
 		panel.MinWidth(b.Bounds().W)
-		s.next = s.next[:0]
+		s.next, s.items = s.next[:0], s.items[:0]
 		fn(panel)
 		*s.values = append((*s.values)[:0], s.next...)
+		off := (*s.off)[:0]
+		for _, it := range s.items {
+			off = append(off, it.IsDisabled())
+		}
+		*s.off = off
+		h := *s.highlight
+		if h < 0 {
+			// The choice, which its option, disabled in the pass
+			// before, did not highlight.
+			h = slices.Index(*s.values, *s.selected)
+		}
+		if h >= 0 && h < len(off) && off[h] {
+			// Disabled after it was built: the first option that is
+			// not, as a menu's (MenuBase), or none.
+			h = slices.Index(off, false)
+		}
+		if h != *s.highlight {
+			*s.highlight = h
+			s.c.rt.consumed = true
+		}
 	})
 }
 
 // Item creates an option choosing value: a row that is Highlighted when
 // the pointer or the arrows are on it, and chooses value and closes the
-// popup when clicked. The option the highlight moves to scrolls into view,
-// once, so that the wheel scrolls on past it.
+// popup when clicked. Disabled leaves it out of the keys' way and of the
+// pointer's. The option the highlight moves to scrolls into view, once,
+// so that the wheel scrolls on past it.
 func (s *selectParts[T]) Item(value T) *node {
 	c := s.c
 	i := len(s.next)
 	s.next = append(s.next, value)
 	item := coreRow(c)
 	item.flags |= flagClickable | flagHover
-	if *s.highlight < 0 && value == *s.selected {
+	s.items = append(s.items, item)
+	// Disabled once built, which the pass before learned.
+	off := i < len(*s.off) && (*s.off)[i]
+	if *s.highlight < 0 && value == *s.selected && !off {
 		*s.highlight = i
 	}
-	if p := [2]float32{c.rt.pointerX, c.rt.pointerY}; item.Hovered() && p != *s.pointer {
+	if p := [2]float32{c.rt.pointerX, c.rt.pointerY}; !off && item.Hovered() && p != *s.pointer {
 		// The pointer moved onto it, which moves the highlight; the
 		// options built before learn it as the frame builds again.
 		*s.pointer = p
@@ -410,8 +513,8 @@ func (s *selectParts[T]) Item(value T) *node {
 	return item
 }
 
-// Highlighted reports whether an option of a select is the one the pointer
-// or the arrows are on.
+// Highlighted reports whether an option of a select, or an item of a menu
+// (MenuBase), is the one the pointer or the arrows are on.
 func (e *node) Highlighted() bool { return e.highlighted }
 
 // PopoverBase shows a panel without a look below anchor while *open is

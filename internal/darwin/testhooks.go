@@ -4,6 +4,7 @@ package darwin
 
 import (
 	"fmt"
+	"image"
 	"math"
 	"os"
 	"sync"
@@ -145,6 +146,78 @@ func TestAppPress(handle uintptr, x, y float64, down bool) {
 		typ = 1 // NSEventTypeLeftMouseDown
 	}
 	testMouse(handle, x, y, true, typ)
+}
+
+// TestPostMouse presses (down) or releases the primary button at (x, y)
+// on screen, in MyGo's coordinates (top-left origin), as the user's mouse
+// does: through the window server, to whatever shows there, the menu
+// bar's items too. It reports false where the process may not post events
+// (Accessibility).
+func TestPostMouse(x, y float64, down bool) bool {
+	testPostOnce.Do(func() {
+		purego.RegisterLibFunc(&cgPreflightPostEventAccess, libCG, "CGPreflightPostEventAccess")
+		purego.RegisterLibFunc(&cgEventCreateMouseEvent, libCG, "CGEventCreateMouseEvent")
+		purego.RegisterLibFunc(&cgEventPost, libCG, "CGEventPost")
+	})
+	if !cgPreflightPostEventAccess() {
+		return false
+	}
+	typ := uint32(2) // kCGEventLeftMouseUp
+	if down {
+		typ = 1 // kCGEventLeftMouseDown
+	}
+	ev := cgEventCreateMouseEvent(0, typ, NSPoint{x, y}, 0) // kCGMouseButtonLeft
+	if ev == 0 {
+		return false
+	}
+	cgEventPost(0, ev) // kCGHIDEventTap
+	cfRelease(ev)
+	return true
+}
+
+var (
+	testPostOnce               sync.Once
+	cgPreflightPostEventAccess func() bool
+	cgEventCreateMouseEvent    func(source uintptr, typ uint32, at NSPoint, button uint32) uintptr
+	cgEventPost                func(tap uint32, ev uintptr)
+)
+
+// TestMouseButtons returns how many presses and releases of the primary
+// button the application took from the window server since the first
+// call, which starts counting them: a test that posts them with
+// TestPostMouse waits for them so.
+func TestMouseButtons() (downs, ups int) {
+	if testButtons == 0 {
+		blk := newBlock(func(_ objc.Block, ev id) id {
+			if sendInt(ev, "type") == 1 { // NSEventTypeLeftMouseDown
+				testDowns++
+			} else {
+				testUps++
+			}
+			return ev
+		})
+		testButtons = retain(send(class("NSEvent"), "addLocalMonitorForEventsMatchingMask:handler:", 1<<1|1<<2, uintptr(blk)))
+	}
+	return testDowns, testUps
+}
+
+// testButtons is TestMouseButtons's monitor, counting into testDowns and
+// testUps. Main thread only.
+var (
+	testButtons        id
+	testDowns, testUps int
+)
+
+// TestClosePopover asks a flyout's popover to close as AppKit asks a
+// transient one as the user presses outside it (performClose:), and
+// reports whether it has one.
+func TestClosePopover(handle uintptr) bool {
+	w := theBackend.byNSWindow[id(handle)]
+	if w == nil || w.popover == 0 {
+		return false
+	}
+	send(w.popover, "performClose:", 0)
+	return true
 }
 
 func testClick(handle uintptr, x, y float64, viaApp bool) {
@@ -931,12 +1004,30 @@ func TestPageKeyShift(handle uintptr, code uint16, chars string, shift bool) boo
 	return true
 }
 
+// TestKeyCmd presses a key with Command held in a window showing native
+// UI, which the window sends to its first responder as it does the
+// keyboard's: the content, or the page of a web view.
+func TestKeyCmd(handle uintptr, code uint16, chars string) bool {
+	w := theBackend.byNSWindow[id(handle)]
+	if w == nil || w.surface == nil {
+		return false
+	}
+	sendKeyFlags(w, code, chars, 1<<20) // NSEventModifierFlagCommand
+	return true
+}
+
 // sendKeyToWindow sends a key down and up to a window, as the keyboard does.
 func sendKeyToWindow(w *window, code uint16, chars string, shift bool) {
 	var flags uint
 	if shift {
 		flags = 1 << 17 // NSEventModifierFlagShift
 	}
+	sendKeyFlags(w, code, chars, flags)
+}
+
+// sendKeyFlags sends a key down and up to a window with the modifier
+// flags held, as the keyboard does.
+func sendKeyFlags(w *window, code uint16, chars string, flags uint) {
 	withPool(func() {
 		number := sendInt(w.win, "windowNumber")
 		s := nsString(chars)
@@ -1434,4 +1525,95 @@ func TestDismissPageMenu() {
 	if openContextMenu != 0 {
 		send(openContextMenu, "cancelTracking")
 	}
+}
+
+var (
+	testPixelsOnce                   sync.Once
+	cgWindowListCreateImage          func(bounds NSRect, list, window, options uint32) uintptr
+	cgBitmapContextCreate            func(data unsafe.Pointer, width, height, bitsPerComponent, bytesPerRow, space uintptr, info uint32) uintptr
+	cgContextSetInterpolationQuality func(ctx uintptr, quality int32)
+	cgContextDrawImage               func(ctx uintptr, rect NSRect, img uintptr)
+	cgContextRelease                 func(ctx uintptr)
+)
+
+// TestWindowPixels returns the content of a window as the window server
+// shows it on screen, not as its views would draw it now: what Core
+// Animation committed and the screen took. One pixel a point, in sRGB;
+// ok is false where the window server gives no image of the window. An
+// app gets the images of its own windows without the permission to record
+// the screen.
+func TestWindowPixels(handle uintptr) (img *image.RGBA, ok bool) {
+	w := theBackend.byNSWindow[id(handle)]
+	if w == nil {
+		return nil, false
+	}
+	loadSurface() // the sRGB color space
+	testPixelsOnce.Do(func() {
+		create, err := purego.Dlsym(libCG, "CGWindowListCreateImage")
+		if err != nil {
+			return // gone from the system
+		}
+		purego.RegisterFunc(&cgWindowListCreateImage, create)
+		purego.RegisterLibFunc(&cgBitmapContextCreate, libCG, "CGBitmapContextCreate")
+		purego.RegisterLibFunc(&cgContextSetInterpolationQuality, libCG, "CGContextSetInterpolationQuality")
+		purego.RegisterLibFunc(&cgContextDrawImage, libCG, "CGContextDrawImage")
+		purego.RegisterLibFunc(&cgContextRelease, libCG, "CGContextRelease")
+	})
+	if cgWindowListCreateImage == nil {
+		return nil, false
+	}
+	const (
+		includingWindow   = 1 << 3 // kCGWindowListOptionIncludingWindow
+		ignoreFraming     = 1 << 0 // kCGWindowImageBoundsIgnoreFraming: no shadow
+		nominalResolution = 1 << 4 // kCGWindowImageNominalResolution
+	)
+	null := NSRect{Origin: NSPoint{math.Inf(1), math.Inf(1)}} // CGRectNull: the window's bounds
+	shot := cgWindowListCreateImage(null, includingWindow, uint32(sendInt(w.win, "windowNumber")), ignoreFraming|nominalResolution)
+	if shot == 0 {
+		return nil, false
+	}
+	defer purego.SyscallN(cgImageRelease, shot)
+	// Drawn into a bitmap of the window's size in points, whatever the
+	// image's resolution, with the rows top to bottom.
+	frame := msgRect(w.win, sel("frame"))
+	fw, fh := int(math.Round(frame.Size.Width)), int(math.Round(frame.Size.Height))
+	if fw <= 0 || fh <= 0 {
+		return nil, false
+	}
+	full := image.NewRGBA(image.Rect(0, 0, fw, fh))
+	const premultipliedLast, byteOrder32Big = 1, 4 << 12
+	ctx := cgBitmapContextCreate(unsafe.Pointer(&full.Pix[0]), uintptr(fw), uintptr(fh), 8, uintptr(full.Stride), cgColorSpaceSRGB, premultipliedLast|byteOrder32Big)
+	if ctx == 0 {
+		return nil, false
+	}
+	cgContextSetInterpolationQuality(ctx, 1) // kCGInterpolationNone
+	cgContextDrawImage(ctx, NSRect{Size: NSSize{float64(fw), float64(fh)}}, shot)
+	cgContextRelease(ctx)
+	// The content view, from the window's bottom-left corner.
+	content := msgRect(send(w.win, "contentView"), sel("frame"))
+	x := int(math.Round(content.Origin.X))
+	y := fh - int(math.Round(content.Origin.Y+content.Size.Height))
+	r := image.Rect(x, y, x+int(math.Round(content.Size.Width)), y+int(math.Round(content.Size.Height))).Intersect(full.Rect)
+	img = image.NewRGBA(image.Rect(0, 0, r.Dx(), r.Dy()))
+	for row := range r.Dy() {
+		copy(img.Pix[row*img.Stride:], full.Pix[full.PixOffset(r.Min.X, r.Min.Y+row):full.PixOffset(r.Max.X, r.Min.Y+row)])
+	}
+	return img, true
+}
+
+// TestDrawablesTrimmed reports whether the GPU renderer of a window's
+// native UI gave back its drawables, as it does once the window has drawn
+// nothing for a while (internal/gpu/metal's trim), and whether the window
+// draws with one.
+func TestDrawablesTrimmed(handle uintptr) (trimmed, ok bool) {
+	w := theBackend.byNSWindow[id(handle)]
+	if w == nil || w.surface == nil {
+		return false, false
+	}
+	l := w.surface.metalLayer()
+	if l == 0 {
+		return false, false
+	}
+	size := msgSize(l, sel("drawableSize"))
+	return size.Width <= 1 && size.Height <= 1, true
 }

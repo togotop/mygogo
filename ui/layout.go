@@ -199,7 +199,7 @@ func (e *node) textParams(width float32) text.Params {
 	if ts.fixedLine && ts.lineHeight > 0 {
 		style.LineHeight = ts.lineHeight / style.FontSize()
 	}
-	p := text.Params{Text: e.text, Width: width, MaxLines: e.maxLines, Style: style, Spans: e.textSpans(), NoWrap: e.noWrap, Ellipsis: e.ellipsis, RTL: e.rtl()}
+	p := text.Params{Text: e.text, Width: width, MaxLines: e.maxLines, Style: style, Spans: e.textSpans(), NoWrap: e.noWrap, Balance: e.balance, Ellipsis: e.ellipsis, RTL: e.rtl()}
 	switch {
 	case ts.align == Center:
 		p.Align = text.Center
@@ -249,7 +249,7 @@ func (e *node) resolvedText() textStyle {
 			out.align = t.align
 		}
 		if take&setUnderline != 0 {
-			out.underline, out.wavy = t.underline, t.wavy
+			out.underline, out.wavy, out.solid = t.underline, t.wavy, t.solid
 		}
 		if take&setSpacing != 0 {
 			out.spacing = t.spacing
@@ -1054,7 +1054,7 @@ func boxBaseline(e *node) (float32, bool) {
 	}
 	var first *node
 	for ch := e.first; ch != nil; ch = ch.next {
-		if ch.flags&(flagAbsolute|flagInvisible) != 0 || ch.hidden {
+		if ch.flags&flagAbsolute != 0 || ch.hidden {
 			continue
 		}
 		if first == nil {

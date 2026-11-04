@@ -229,6 +229,9 @@ func (w *window) setUp(controller uintptr) {
 	w.applyWebViewBackground()
 
 	w.addUserScripts()
+	if w.host != nil {
+		forwardKeys(w)
+	}
 
 	// The add methods write a registration token. Its address is taken in
 	// each call (go:uintptrescapes), as a uintptr saved earlier goes stale
@@ -629,7 +632,7 @@ func (w *window) acceleratorKeyPressed(_, args uintptr) {
 // pageAccelerator returns the menu command a key pressed in a page runs,
 // if any. A page keeps the keys of the edit roles, as in a browser and in
 // native UI: WebView2 cuts, copies and pastes with the page's own events
-// and every format of the clipboard, where editRole pastes text alone.
+// and every format of the clipboard.
 func (w *window) pageAccelerator(key accelKey) (uint16, bool) {
 	cmd, ok := w.accels[key]
 	if !ok {

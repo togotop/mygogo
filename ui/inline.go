@@ -93,6 +93,7 @@ func (e *node) spanStyle() Span {
 		s.Underline = t.underline && !t.wavy && !t.dotted
 		s.WavyUnderline = t.underline && t.wavy
 		s.DottedUnderline = t.underline && t.dotted
+		s.solid = t.underline && t.solid
 	}
 	if t.set&setStrike != 0 {
 		s.Strikethrough = t.strike
@@ -169,6 +170,7 @@ func over(s, base Span) Span {
 	s.Underline = s.Underline || base.Underline
 	s.WavyUnderline = s.WavyUnderline || base.WavyUnderline
 	s.DottedUnderline = s.DottedUnderline || base.DottedUnderline
+	s.solid = s.solid || base.solid
 	s.Strikethrough = s.Strikethrough || base.Strikethrough
 	return s
 }
@@ -211,7 +213,7 @@ func union(a, b Rect) Rect {
 func (p *Painter) paintInline(e *node) {
 	if e.ringShown() {
 		for _, r := range e.frags {
-			p.FocusRing(r, [4]float32{2, 2, 2, 2})
+			p.focusRingOf(e, r, [4]float32{2, 2, 2, 2})
 		}
 	}
 	for ch := e.first; ch != nil; ch = ch.next {

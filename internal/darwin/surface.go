@@ -150,14 +150,16 @@ type surface struct {
 	due         bool
 	// deferred tells that the content left the last paced frame to draw
 	// later (FrameNow): the link keeps running meanwhile. soon tells that
-	// a frame waits for the backend's queue (drawSoon), and drawn that the
-	// content's first frame reached the surface (FirstFrame).
+	// a frame waits for the backend's queue (drawSoon), asked for after
+	// the frame that began at soonAfter, and drawn that the content's
+	// first frame reached the surface (FirstFrame).
 	deferred  bool
 	timing    bool
 	soon      bool
 	drawn     bool
 	resized   bool
 	lastFrame time.Time
+	soonAfter time.Time
 	framePass uint64
 	cursor    platform.Cursor
 	inside    bool
@@ -316,16 +318,23 @@ var _ platform.FirstFrameSurface = (*surface)(nil)
 // shows, and runModal gives up, or the sheet never ends (#883). Only
 // frames AppKit asks for, as a resize's, which must draw with the
 // window's change, draw there (updateLayer).
+//
+// A frame drawn while one waits, as AppKit's display of the view draws
+// the first frame of a window ordered in, drew what that one would, which
+// then draws nothing; one asked for after it, as once the window shows
+// (SurfaceShown), still draws: the frame waiting draws it, rather than
+// none, which would stop what moves for good.
 func (s *surface) drawSoon() {
+	s.soonAfter = s.lastFrame
 	if s.soon {
 		return
 	}
 	s.soon = true
-	last := s.lastFrame
 	s.w.b.post(func() {
 		s.soon = false
-		// A frame drawn since, as a resize's, drew what this one would.
-		if s.w.b.surfaceOf(s.view) != s || s.lastFrame != last {
+		// A frame drawn since the last ask, as a resize's, drew what
+		// this one would.
+		if s.w.b.surfaceOf(s.view) != s || s.lastFrame != s.soonAfter {
 			return
 		}
 		s.frameNow(false)
@@ -381,14 +390,20 @@ func (s *surface) frameNow(paced bool) {
 // does the frames that change it: the frame drawn last then takes a
 // drawable until the transaction commits.
 func (s *surface) presentsWithTransaction() bool {
+	l := s.metalLayer()
+	return l != 0 && sendBool(l, "presentsWithTransaction")
+}
+
+// metalLayer returns the GPU renderer's CAMetalLayer, or nil without one.
+func (s *surface) metalLayer() id {
 	sublayers := send(send(s.view, "layer"), "sublayers")
 	metalLayer := uintptr(class("CAMetalLayer"))
 	for i := range sendInt(sublayers, "count") {
 		if l := send(sublayers, "objectAtIndex:", uintptr(i)); sendBool(l, "isKindOfClass:", metalLayer) {
-			return sendBool(l, "presentsWithTransaction")
+			return l
 		}
 	}
-	return false
+	return 0
 }
 
 // Occluded reports whether nothing of the window shows on screen: hidden,
@@ -888,19 +903,32 @@ func registerSurfaceClass() {
 			if s == nil {
 				return
 			}
-			if s.framePass == caPass && send(self, "inLiveResize") == 0 && (!s.resized || s.presentsWithTransaction()) {
-				// AppKit displays the view again before Core Animation
-				// commits the frame drawn in this pass, as while the
-				// trackpad scrolls. The next refresh draws it: as one just
-				// drew, not at once; and after a frame presented with the
-				// transaction, the frame would wait a second for a
-				// drawable, the layer's two being taken until the commit.
-				// A frame for a new size after one presented at once, as
-				// those of the display link's ticks are, draws at once, or
-				// the layer would stretch the last one meanwhile. A window
-				// that resizes, as zooming animates it, displays the view
-				// for each of its sizes within one pass of the run loop,
-				// committing each: those frames draw at once too.
+			// AppKit displays the view again before Core Animation commits
+			// the frame drawn in this pass, as while the trackpad scrolls.
+			// The next refresh draws it: as one just drew, not at once.
+			//
+			// A frame for a new size, after one presented with the
+			// transaction, waits for the next refresh too, in whatever
+			// pass. In this pass, it would wait a second for a drawable,
+			// the layer's two being taken until the commit. In a later
+			// one, as AppKit displays the view once the window server
+			// resized the window, it is presented with the transaction
+			// too, and does not show, even tens of milliseconds after the
+			// last: the window keeps that one, stretched to its new size,
+			// and later frames, the same as the lost one, draw nothing
+			// (#1044). A window resized from its view hits it, as
+			// the frame that resizes it presents its old size with the
+			// transaction, and so does one resized right after a frame
+			// that changed the layer, as the first after an idle while.
+			// Drawn from the display link's tick, it shows.
+			//
+			// A frame for a new size after one presented at once, as
+			// those of the display link's ticks are, draws at once, or the
+			// layer would stretch the last one meanwhile. A window in a
+			// live resize, as zooming animates it, displays the view for
+			// each of its sizes within one pass of the run loop,
+			// committing each: those frames draw at once too.
+			if send(self, "inLiveResize") == 0 && (s.resized && s.presentsWithTransaction() || !s.resized && s.framePass == caPass) {
 				s.lastFrame = time.Now()
 				s.RequestFrame()
 				return
