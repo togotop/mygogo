@@ -50,6 +50,23 @@ func TestMenuItemEnabled(path ...string) (enabled bool, err error) {
 	return enabled, err
 }
 
+// TestMenuItemSubtitle returns the title and the subtitle of an item of the
+// application menu, found by its title as TestPerformMenuItem finds it.
+func TestMenuItemSubtitle(path ...string) (title, subtitle string, err error) {
+	withPool(func() {
+		var menu id
+		var index int
+		if menu, index, err = menuItemAt(path); err == nil {
+			item := send(menu, "itemAtIndex:", uintptr(index))
+			title = goString(send(item, "title"))
+			if respondsTo(item, "subtitle") {
+				subtitle = goString(send(item, "subtitle"))
+			}
+		}
+	})
+	return title, subtitle, err
+}
+
 // menuItemAt finds an item of the application menu by the titles along
 // its path, and returns its menu and its index there.
 func menuItemAt(path []string) (menu id, index int, err error) {
@@ -137,6 +154,24 @@ func TestClick(handle uintptr, x, y float64) { testClick(handle, x, y, false) }
 // transient popovers that close on clicks elsewhere. The application has
 // handled the click when it returns (handlePosted).
 func TestAppClick(handle uintptr, x, y float64) { testClick(handle, x, y, true) }
+
+// TestHitView returns the class of the view a window hit-tests at (x, y)
+// of its content, in DIPs from its top left.
+func TestHitView(handle uintptr, x, y float64) (cls string) {
+	w := theBackend.byNSWindow[id(handle)]
+	if w == nil {
+		return ""
+	}
+	withPool(func() {
+		content := send(w.win, "contentView")
+		b := msgRect(content, sel("bounds"))
+		hit := msgHitTest(content, sel("hitTest:"), NSPoint{X: x, Y: b.Size.Height - y})
+		if hit != 0 {
+			cls = goString(send(hit, "className"))
+		}
+	})
+	return cls
+}
 
 // TestAppPress is half of TestAppClick: the left mouse down, or the up,
 // which a user's click handles apart, a frame or more later.
@@ -696,6 +731,12 @@ func TestPageGestures(handle uintptr, webView int) (swipe, pinch, ok bool) {
 	return sendBool(w.web, "allowsBackForwardNavigationGestures"), sendBool(w.web, "allowsMagnification"), true
 }
 
+// TestActivate brings the application in front, as clicking its Dock icon
+// does.
+func TestActivate() {
+	withPool(func() { send(theBackend.app, "activateIgnoringOtherApps:", 1) })
+}
+
 // TestIsFrontmost reports whether the application is the frontmost one,
 // which NSApp's isActive does not tell while a nonactivating panel is the
 // key window: it reports the app active then.
@@ -746,6 +787,78 @@ func TestMaterialState(handle uintptr) int {
 	return sendInt(w.effect, "state")
 }
 
+// TestGlassTint returns the glass's tint, in sRGB, and 0, 0, 0, 0 when it
+// has none or the window has no glass.
+func TestGlassTint(handle uintptr) (red, green, blue, alpha float64) {
+	w := theBackend.byNSWindow[id(handle)]
+	if w == nil || w.effect == 0 || !w.glass {
+		return 0, 0, 0, 0
+	}
+	withPool(func() {
+		c := send(w.effect, "tintColor")
+		if c == 0 {
+			return
+		}
+		c = send(c, "colorUsingColorSpace:", uintptr(send(class("NSColorSpace"), "sRGBColorSpace")))
+		if c == 0 {
+			return
+		}
+		red, green, blue, alpha = msgFloat(c, sel("redComponent")), msgFloat(c, sel("greenComponent")),
+			msgFloat(c, sel("blueComponent")), msgFloat(c, sel("alphaComponent"))
+	})
+	return red, green, blue, alpha
+}
+
+// TestNativeGlassSupported reports whether windows show the system's
+// glass: the system has Liquid Glass and does not reduce transparency, as
+// GitHub's macOS runners do.
+func TestNativeGlassSupported() (ok bool) {
+	if !hasClass("NSGlassEffectView") {
+		return false
+	}
+	withPool(func() { ok = !sendBool(workspace(), "accessibilityDisplayShouldReduceTransparency") })
+	return ok
+}
+
+// TestNativeGlass returns the first system's glass view of a window's
+// native content: its class, frame in its view's coordinates, and style.
+func TestNativeGlass(handle uintptr) (class string, frame [4]float64, style int, ok bool) {
+	w := theBackend.byNSWindow[id(handle)]
+	if w == nil || w.surface == nil {
+		return "", frame, 0, false
+	}
+	for _, v := range w.surface.glass {
+		r := msgRect(v, sel("frame"))
+		return goString(send(v, "className")), [4]float64{r.Origin.X, r.Origin.Y, r.Size.Width, r.Size.Height}, sendInt(v, "style"), true
+	}
+	return "", frame, 0, false
+}
+
+// TestNativeGlassTint returns the first system's glass view of a window's
+// native content tint, in sRGB.
+func TestNativeGlassTint(handle uintptr) (red, green, blue, alpha float64) {
+	w := theBackend.byNSWindow[id(handle)]
+	if w == nil || w.surface == nil {
+		return 0, 0, 0, 0
+	}
+	for _, v := range w.surface.glass {
+		withPool(func() {
+			c := send(v, "tintColor")
+			if c == 0 {
+				return
+			}
+			c = send(c, "colorUsingColorSpace:", uintptr(send(class("NSColorSpace"), "sRGBColorSpace")))
+			if c == 0 {
+				return
+			}
+			red, green, blue, alpha = msgFloat(c, sel("redComponent")), msgFloat(c, sel("greenComponent")),
+				msgFloat(c, sel("blueComponent")), msgFloat(c, sel("alphaComponent"))
+		})
+		return red, green, blue, alpha
+	}
+	return 0, 0, 0, 0
+}
+
 // TestRoundedBacking reports whether a window is opaque, and the alpha and
 // red, in sRGB, of its content view's background, which fills its rounded
 // corners' inside.
@@ -767,6 +880,23 @@ func TestRoundedBacking(handle uintptr) (opaque bool, alpha, red float64) {
 		}
 	})
 	return opaque, alpha, red
+}
+
+// TestWindowBacking reports whether a window is opaque, and the alpha of
+// its background color, in sRGB.
+func TestWindowBacking(handle uintptr) (opaque bool, alpha float64) {
+	w := theBackend.byNSWindow[id(handle)]
+	if w == nil {
+		return false, 0
+	}
+	opaque = sendBool(w.win, "isOpaque")
+	withPool(func() {
+		c := send(send(w.win, "backgroundColor"), "colorUsingColorSpace:", uintptr(send(class("NSColorSpace"), "sRGBColorSpace")))
+		if c != 0 {
+			alpha = msgFloat(c, sel("alphaComponent"))
+		}
+	})
+	return opaque, alpha
 }
 
 // TestDockInspector opens the web inspector of a window docked to it, and

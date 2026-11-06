@@ -87,11 +87,18 @@ announced "Saved"
 
 A line is the element's ref, `[role]`, its label in quotes, then what
 it has of `value=`, `placeholder=` (when it has no label), `key=` (the
-app's own name for it), its states and `focused`. Empty fields are left
+app's own name for it), its states, `current=` (what it is the current
+one of, as the last crumb of a breadcrumb trail is the `page`),
+`autocomplete=` (what a field's suggestions complete as you type: `list`
+for a popup of them, `inline` for the text completed in place, or
+`both`), `haspopup=`, `roledescription=` and `focused`. Empty fields are left
 out, and so is `focusable`, which every control is. `webview` marks a web
 view inside native UI: its page has no elements here. `announced` lines
 are what the app announced to screen readers. Labels and values longer
 than 120 characters are cut, ending in `…" (N more)`.
+`keyshortcuts=` (after `key=`) is the keys the app says press or focus
+the element, as screen readers read them (`aria-keyshortcuts`): `"⌘K"`
+on macOS, `"Ctrl+K"` elsewhere, several separated by spaces.
 
 - `-i` (`--interactive`) keeps controls and elements with actions:
   buttons, fields, check boxes, links, list items you can press, and so
@@ -112,10 +119,15 @@ Roles are `group`, `text`, `heading`, `button`, `link`, `checkBox`,
 `tree`, `treeItem`, `tabList`, `tab`, `scroll`, `dialog`, `alertDialog`,
 `popup`, `tooltip`, `splitter`, `status`, `toolbar`, `radioGroup`,
 `disclosure`, `colorWell`, `menu`, `menuBar`, `menuItem`,
-`menuItemCheckBox` and `menuItemRadio`. States are `disabled`, `checked`,
+`menuItemCheckBox`, `menuItemRadio`, `region`, `log`, `timer`, `alert`,
+`separator`, `rowHeader`, `search`, `article` and `navigation`. States are `disabled`, `checked`,
 `mixed`, `selected`, `expanded`, `expandable`, `multiline`, `password`,
 `readOnly`, `selectable`, `multiselectable`, `offscreen`, `segment`,
-`search`, `invalid`, `sortAscending`, `sortDescending` and `vertical`.
+`search`, `invalid`, `sortAscending`, `sortDescending`, `sortOther`,
+`vertical` and `busy`. `current=` is `true`, `page`, `step`, `location`,
+`date` or `time`; `haspopup=` the kind of popup the element opens
+(`menu`, `listbox`, `tree`, `grid` or `dialog`), and `roledescription=`
+what the app calls its role.
 Only what assistive technology reads is there: rows and columns that
 only lay out others have no line.
 
@@ -210,6 +222,8 @@ settled: a window it opened comes as `+` lines.
 - `wait` waits for the window to settle (`--timeout`, as above).
 - `wait <sel>` waits until the window shows the element; `wait --text
   <s>` until an element's label or value contains `s` (case sensitive).
+  These check the condition while the window keeps drawing; `--settle`
+  waits for it to settle after the condition is met.
 - `--gone` waits until it no longer shows it, as a dialog closing.
 - It prints `ok`, or with `--settle` the diff. After `--timeout` it fails
   with `timeout`. Never sleep: wait for what you expect.

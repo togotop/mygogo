@@ -157,6 +157,14 @@ type StyleBackend interface {
 	SetStyleSheet(css string) error
 }
 
+// WindowButtonsBackend reports the window buttons the desktop puts at the
+// start and at the end of title bars (Linux): "minimize", "maximize" and
+// "close", in their order, none where the desktop wants none. Main thread
+// only.
+type WindowButtonsBackend interface {
+	WindowButtons() (start, end []string)
+}
+
 // AppOptions configures Backend.Init.
 type AppOptions struct {
 	Name string
@@ -399,6 +407,9 @@ type WindowOptions struct {
 	HideWindowButtons    bool
 	TrafficLightPosition *Point
 	Vibrancy             string
+	// VibrancyTint tints the material, where the platform's material takes
+	// one (macOS 26's Liquid Glass): nil for none.
+	VibrancyTint *Color
 	// CornerRadius rounds a frameless window's corners, in DIPs: its
 	// content and material are cut to them (macOS), or the system rounds
 	// it with its own corners (Windows 11).
@@ -586,6 +597,10 @@ type Window interface {
 	SetIgnoreMouseEvents(v bool)
 	SetContentProtection(v bool)
 	SetVibrancy(material string)
+	// SetVibrancyTint tints the window's material, where it takes one
+	// (macOS 26's Liquid Glass); nil removes the tint. Other materials and
+	// platforms ignore it.
+	SetVibrancyTint(c *Color)
 	// SetActiveAppearance keeps the window drawn as active, as the key
 	// window of the app in front, while it is not (macOS).
 	SetActiveAppearance(v bool)
@@ -1028,6 +1043,7 @@ type MenuItem struct {
 	ID          int
 	Type        MenuItemType
 	Label       string
+	Subtitle    string
 	Role        string
 	Accelerator string
 	Enabled     bool
@@ -1048,10 +1064,12 @@ type MenuItem struct {
 	Name   string
 }
 
-// FileFilter restricts the files shown in file dialogs.
+// FileFilter restricts the files shown in file dialogs: those of its
+// Extensions, and of its MIMETypes, which may be "kind/*".
 type FileFilter struct {
 	Name       string
 	Extensions []string
+	MIMETypes  []string
 }
 
 // OpenDialogOptions configures an open panel.
@@ -1135,6 +1153,14 @@ type Clipboard interface {
 	AvailableFormats() []string
 }
 
+// LaterClipboard is a clipboard whose writes finish later, as a
+// browser's, whose clipboard answers with a promise: WriteTextThen puts
+// text there as WriteText does, and gives done what came of it, on the
+// main thread. Desktops' clipboards answer at once (WriteData).
+type LaterClipboard interface {
+	WriteTextThen(text string, done func(error))
+}
+
 // Shell integrates with the desktop environment.
 type Shell interface {
 	OpenExternal(url string) error
@@ -1214,7 +1240,27 @@ type Preferences struct {
 	// TextScale is how many times larger than usual text should be, as
 	// Windows's and GNOME's text size settings say; 0 or 1 for usual.
 	TextScale float64
+	// Pointer is how accurate the primary pointing device is, and
+	// AnyPointer the most accurate of all, as Media Queries 4's pointer
+	// and any-pointer: PointerFine, a mouse's, where it is not known.
+	Pointer, AnyPointer PointerAccuracy
+	// NoHover tells that the primary pointing device cannot hover, as a
+	// touch screen, and NoAnyHover that none can (hover and any-hover:
+	// none).
+	NoHover, NoAnyHover bool
 }
+
+// PointerAccuracy is how accurately a pointing device points.
+type PointerAccuracy uint8
+
+const (
+	// PointerFine is a mouse's, a touchpad's or a pen's.
+	PointerFine PointerAccuracy = iota
+	// PointerCoarse is a finger's on a touch screen.
+	PointerCoarse
+	// PointerNone is that of no pointing device at all.
+	PointerNone
+)
 
 // FontRendering is how the desktop's settings say to rasterize text, as
 // GTK's gtk-xft settings: each field is "" for the default, or unknown.

@@ -251,6 +251,28 @@ func (it *MenuItem) Radio(on bool) *MenuItem {
 	return it
 }
 
+// MenuIcon is the image of a menu item, as mygo.NewMenuIcon makes it.
+type MenuIcon interface {
+	PlatformMenuIcon() *platform.MenuIcon
+}
+
+// Icon shows an image beside the item's label, one mygo.NewMenuIcon made:
+// make each once, not as the menu builds, and give it to the items that
+// show it. A template image takes the color of the item's text. nil shows
+// none. The system's menus show it as package mygo's items do (see
+// NewMenuIcon), and browsers show none; PopoverMenu draws it on every
+// platform.
+//
+//	if m.Item("Archive").Icon(archiveIcon).Chosen() {
+//		app.archive(msg)
+//	}
+func (it *MenuItem) Icon(icon MenuIcon) *MenuItem {
+	if it.p != nil && icon != nil {
+		it.p.Icon = icon.PlatformMenuIcon()
+	}
+	return it
+}
+
 // Shortcut shows a key with modifiers by the item, as the shortcut that
 // does the same; the view handles the key itself, as with
 // Context.Shortcut.
@@ -287,7 +309,7 @@ type menuState struct {
 	// the menu key or Shift+F10, or a menu button's for its keys; below
 	// when a menu button's opens below the button itself, rather than
 	// from a toolbar's overflow menu.
-	button, chosenButton, key, below bool
+	button, chosenButton, key, last, below bool
 	// release is the element whose menu opens when the secondary button
 	// goes up, as on Windows, on the text releaseText.
 	release, releaseText uint64
@@ -364,7 +386,7 @@ func (rt *engine) textAround(chain []uint64, s *state) *state {
 // focus.
 func (rt *engine) askMenu(s *state, x, y float32, button bool) {
 	mr := &rt.menu
-	mr.asked, mr.x, mr.y, mr.button, mr.text, mr.key, mr.below = s.id, x, y, button, 0, false, false
+	mr.asked, mr.x, mr.y, mr.button, mr.text, mr.key, mr.last, mr.below = s.id, x, y, button, 0, false, false, false
 	// The menu takes the press: the release goes to it.
 	if rt.pressed != nil {
 		rt.pressed.pressed = false
@@ -482,6 +504,13 @@ func (rt *engine) openMenuButton(s *state, key bool) {
 	x, y := s.menuCorner()
 	rt.askMenu(s, x, y, true)
 	rt.menu.key, rt.menu.below = key, true
+}
+
+// openMenuButtonOnLast opens the menu of menu button s from the keyboard
+// on its last item that can be chosen, as the Up key does.
+func (rt *engine) openMenuButtonOnLast(s *state) {
+	rt.openMenuButton(s, true)
+	rt.menu.last = true
 }
 
 // menuCorner returns where the menu of a button goes: at its bottom left

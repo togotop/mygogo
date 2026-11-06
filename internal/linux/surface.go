@@ -9,6 +9,7 @@ import (
 	"os"
 	"sync"
 	"unicode/utf8"
+	"unsafe"
 
 	"github.com/ebitengine/purego"
 
@@ -22,8 +23,9 @@ import (
 // and GTK shows them. Without OpenGL, frames drawn in memory are painted
 // with cairo in the draw signal, as on a GtkDrawingArea, which the surface
 // is with MYGO_GPU=0 and where OpenGL would not draw on a GPU (gpuGL).
-// GTK's frame clock paces both; keys go through a GtkIMContext while a
-// text input has the focus.
+// GTK's frame clock paces both, at the refresh rate of the monitor showing
+// the window (paceFrameClock); keys go through a GtkIMContext while a text
+// input has the focus.
 //
 // Frames drawn in memory are drawn in the frame clock's update phase, by a
 // tick callback, before GTK paints: the area then asks GTK to repaint what
@@ -76,6 +78,10 @@ var (
 	gdkWindowGetUserData        func(w ptr, data *ptr)
 	gdkEventGetSourceDevice     func(e ptr) ptr
 	gdkDeviceGetSource          func(d ptr) int32
+	gdkEventGetAxis             func(e ptr, use int32, value *float64) bool
+	gtkWidgetGetFrameClock      func(w ptr) ptr
+	gdkFrameClockCurrentTimings func(clock ptr) ptr
+	gdkFrameTimingsRefresh      func(t ptr) int64
 
 	cbSurfaceDraw, cbSurfaceSize, cbSurfaceRealize, cbSurfaceButton ptr
 	cbSurfaceMotion, cbSurfaceLeave, cbSurfaceScroll, cbSurfaceKey  ptr
@@ -120,6 +126,10 @@ func loadSurface() {
 		mustBind(d, &gdkWindowGetUserData, "gdk_window_get_user_data")
 		mustBind(d, &gdkEventGetSourceDevice, "gdk_event_get_source_device")
 		mustBind(d, &gdkDeviceGetSource, "gdk_device_get_source")
+		mustBind(d, &gdkEventGetAxis, "gdk_event_get_axis")
+		mustBind(t, &gtkWidgetGetFrameClock, "gtk_widget_get_frame_clock")
+		mustBind(d, &gdkFrameClockCurrentTimings, "gdk_frame_clock_get_current_timings")
+		mustBind(d, &gdkFrameTimingsRefresh, "gdk_frame_timings_get_refresh_interval")
 		// GtkGLArea came in GTK 3.16.
 		if !bind(t, &gtkGLAreaNew, "gtk_gl_area_new") || !bind(t, &gtkGLAreaSetRequiredVersion, "gtk_gl_area_set_required_version") ||
 			!bind(t, &gtkGLAreaSetHasAlpha, "gtk_gl_area_set_has_alpha") || !bind(t, &gtkGLAreaGetError, "gtk_gl_area_get_error") ||
@@ -169,6 +179,9 @@ type surface struct {
 		stride, width, height int
 	}
 
+	// held are the keys the content got pressed and not yet released,
+	// whose releases the input method may take (cbSurfaceKey).
+	held platform.HeldKeys
 	// pinch is the scale of the touchpad's pinch in progress at its last
 	// event, from 1 as it began.
 	pinch float64
@@ -185,7 +198,9 @@ type surface struct {
 	lastKey ptr
 	// pressing is the key press being handled, which the Tab moving the
 	// focus to a web view passes on to it (TabInto).
-	pressing     ptr
+	pressing ptr
+	// down are the keys held, which tell a press's auto-repeat.
+	down         keysDown
 	lastPointer  ptr
 	clicks       platform.ClickCounter
 	dragContext  ptr
@@ -542,9 +557,18 @@ func (s *surface) Idle() {
 	}
 }
 
-// RefreshRate returns the refresh rate of the monitor showing the area,
-// which GDK knows in millihertz.
-func (s *surface) RefreshRate() float64 {
+// RefreshRate returns the refresh rate of the monitor showing the area.
+func (s *surface) RefreshRate() float64 { return float64(s.refreshMilliHz()) / 1000 }
+
+// Occluded reports whether nothing of the window shows on screen: while it
+// is minimized, as GDK tells on X11. Wayland tells no such thing, nor do
+// windows covered by others.
+func (s *surface) Occluded() bool { return s.w.state&stateIconified != 0 }
+
+// refreshMilliHz returns the refresh rate of the monitor showing the area,
+// in millihertz as GDK knows it, 0 when unknown: on Wayland the output the
+// window last entered, on X11 the monitor with most of it.
+func (s *surface) refreshMilliHz() int32 {
 	win := gtkWidgetGetWindow(s.area)
 	if s.w.closed || win == 0 {
 		return 0
@@ -553,7 +577,84 @@ func (s *surface) RefreshRate() float64 {
 	if m == 0 {
 		return 0
 	}
-	return float64(gdkMonitorGetRefreshRate(m)) / 1000
+	return max(gdkMonitorGetRefreshRate(m), 0)
+}
+
+// paceFrameClock tells GTK's frame clock how often the monitor showing the
+// area refreshes, in the timings of the frame being drawn: the clock waits
+// that long after a frame before the next (gdk/gdkframeclockidle.c), and
+// 1/60 s while no frame's timings tell it. GDK tells it only from the
+// compositor: on Wayland in the frame callback of a paint it commits
+// itself, which it never asks for when it composites the window with
+// OpenGL, as eglSwapBuffers commits, and on X11 from a compositor sending
+// _NET_WM_FRAME_TIMINGS. Without, the GtkGLArea drew 60 frames a second
+// on a 165 Hz display under Niri, as on X11 without a compositor
+// (#1219). Each frame asks the monitor again, which follows the window to
+// another; one whose rate is unknown keeps the clock's 60 Hz, and a
+// compositor's rate arriving later replaces this one.
+func (s *surface) paceFrameClock() {
+	clock := gtkWidgetGetFrameClock(s.area)
+	if clock == 0 {
+		return
+	}
+	t := gdkFrameClockCurrentTimings(clock)
+	if t == 0 || gdkFrameTimingsRefresh(t) != 0 {
+		return
+	}
+	if us := refreshInterval(s.refreshMilliHz()); us > 0 {
+		setRefreshInterval(t, us, gdkFrameTimingsRefresh)
+	}
+}
+
+// refreshInterval returns the time between refreshes of a display of mhz
+// millihertz in microseconds, as GDK computes it from a Wayland output's
+// rate, 0 for an unknown rate.
+func refreshInterval(mhz int32) int64 {
+	if mhz <= 0 {
+		return 0
+	}
+	return 1_000_000_000 / int64(mhz)
+}
+
+// refreshIntervalOffsets are where GdkFrameTimings, which GDK keeps
+// private, may hold refresh_interval: after smoothed_frame_time, which
+// GTK 3.24.24 added, else in its place.
+var refreshIntervalOffsets = [...]uintptr{56, 48}
+
+// refreshIntervalAt is the offset of the timings' refresh_interval, once
+// a write there read back through its getter; -1 once none did.
+var refreshIntervalAt int
+
+// setRefreshInterval sets the refresh interval of frame timings t, which
+// get (gdk_frame_timings_get_refresh_interval) reads as 0, to us, reporting
+// whether it did: at the first offset whose write get reads back. A field
+// holding a value is not the interval, and one that held 0 gets 0 back
+// when get did not see the write.
+func setRefreshInterval(t ptr, us int64, get func(t ptr) int64) bool {
+	offsets := refreshIntervalOffsets[:]
+	switch {
+	case refreshIntervalAt < 0:
+		return false
+	case refreshIntervalAt > 0:
+		offsets = []uintptr{uintptr(refreshIntervalAt)}
+	}
+	base := *(*unsafe.Pointer)(unsafe.Pointer(&t))
+	for _, off := range offsets {
+		f := (*int64)(unsafe.Add(base, off))
+		if *f != 0 {
+			continue
+		}
+		*f = us
+		if get(t) == us {
+			refreshIntervalAt = int(off)
+			return true
+		}
+		*f = 0
+	}
+	if refreshIntervalAt == 0 {
+		refreshIntervalAt = -1
+	}
+	return false
 }
 
 func (s *surface) PresentPixels(pix []byte, stride, width, height int) {
@@ -600,6 +701,16 @@ var cursorNames = map[platform.Cursor]string{
 	platform.CursorResizeW: "w-resize", platform.CursorResizeColumn: "col-resize", platform.CursorResizeRow: "row-resize",
 	platform.CursorVerticalText: "vertical-text", platform.CursorCopy: "copy", platform.CursorAlias: "alias",
 	platform.CursorContextMenu: "context-menu", platform.CursorNone: "none",
+	platform.CursorProgress: "progress", platform.CursorWait: "wait", platform.CursorHelp: "help", platform.CursorCell: "cell",
+	platform.CursorZoomIn: "zoom-in", platform.CursorZoomOut: "zoom-out", platform.CursorAllScroll: "all-scroll",
+	platform.CursorNoDrop: "no-drop",
+}
+
+// cursorFallbacks are the nearest cursors for those a cursor theme may
+// lack, which GDK finds no X cursor for either.
+var cursorFallbacks = map[platform.Cursor]string{
+	platform.CursorProgress: "wait", platform.CursorCell: "crosshair",
+	platform.CursorAllScroll: "move", platform.CursorNoDrop: "not-allowed",
 }
 
 func (s *surface) SetCursor(c platform.Cursor) {
@@ -615,6 +726,9 @@ func (s *surface) SetCursor(c platform.Cursor) {
 			name = "default"
 		}
 		cur = gdkCursorNewFromName(gtkWidgetGetDisplay(s.area), cs(name))
+		if fallback := cursorFallbacks[c]; cur == 0 && fallback != "" {
+			cur = gdkCursorNewFromName(gtkWidgetGetDisplay(s.area), cs(fallback))
+		}
 		surfaceCursors[c] = cur
 	}
 	gdkWindowSetCursor(win, cur)
@@ -677,6 +791,9 @@ func (s *surface) send(ev platform.SurfaceEvent) bool {
 	if ev.Kind == platform.PointerDown || ev.Kind == platform.SurfaceBlur {
 		s.clientComposition.Reset()
 	}
+	if !s.held.Track(ev) {
+		return false
+	}
 	if s.w.closed {
 		return false
 	}
@@ -705,8 +822,10 @@ func (s *surface) touchEvent(typ int32, event ptr) {
 		evs = s.touch.end(seq, x, y, t, typ == 40)
 	}
 	mods := gdkMods(field[uint32](event, 48))
+	pressure := eventPressure(event)
 	for _, ev := range evs {
 		ev.Mods = mods
+		ev.Pointer, ev.Pressure = platform.PointerTouch, pressure
 		if ev.Kind == platform.PointerDown {
 			if !gtkWidgetHasFocus(s.area) {
 				gtkWidgetGrabFocus(s.area)
@@ -723,6 +842,36 @@ func (s *surface) touchEvent(typ int32, event ptr) {
 		}
 		s.send(ev)
 	}
+}
+
+// eventDevice returns the device of a button or motion event, by its
+// source device, and the pressure of its axes: a tablet's pen or eraser,
+// or a touchscreen's finger GTK makes a mouse of, else a mouse or a
+// touchpad, whose pressure the content leaves to Pointer Events' default.
+func eventDevice(event ptr) (platform.PointerKind, float64) {
+	k := platform.PointerMouse
+	if d := gdkEventGetSourceDevice(event); d != 0 {
+		switch gdkDeviceGetSource(d) {
+		case 1, 2: // GDK_SOURCE_PEN, GDK_SOURCE_ERASER
+			k = platform.PointerPen
+		case 5: // GDK_SOURCE_TOUCHSCREEN
+			k = platform.PointerTouch
+		}
+	}
+	if k == platform.PointerMouse {
+		return k, 0
+	}
+	return k, eventPressure(event)
+}
+
+// eventPressure returns the pressure of an event's axes, which GDK
+// scales from 0 to 1 (GDK_AXIS_PRESSURE), or 0 for none.
+func eventPressure(event ptr) float64 {
+	var v float64
+	if !gdkEventGetAxis(event, 3, &v) {
+		return 0
+	}
+	return v
 }
 
 // emulated tells that a button or motion event is the mouse GTK makes of
@@ -825,6 +974,102 @@ func eventPhysicalKey(event ptr) platform.Key {
 	return platform.KeyUnknown
 }
 
+// eventKeyCode reads the key by position from GdkEventKey.hardware_keycode,
+// as eventPhysicalKey does, on any keyboard.
+func eventKeyCode(event ptr) platform.KeyCode {
+	if code := field[uint16](event, 48); code >= 8 {
+		return platform.KeyCodeForEvdev(code - 8)
+	}
+	return platform.CodeUnknown
+}
+
+// keyEvent handles a GdkEventKey (type 0, state 24, keyval 28,
+// hardware_keycode 48), and reports whether it stops there.
+func (s *surface) keyEvent(event ptr) bool {
+	kind := platform.KeyPressed
+	repeat := false
+	keycode := field[uint16](event, 48)
+	if field[int32](event, 0) == 9 { // GDK_KEY_RELEASE
+		kind = platform.KeyReleased
+		s.down.release(keycode)
+	} else {
+		// Before the input method sees it, which may take the press
+		// or the release.
+		repeat = s.down.press(keycode)
+		s.clientComposition.Reset()
+		if s.lastKey != 0 {
+			gdkEventFree(s.lastKey)
+		}
+		s.lastKey = gdkEventCopy(event)
+	}
+	if s.rawInput() {
+		if kind == platform.KeyPressed {
+			defer s.typed(event)
+		}
+	} else if s.textInput && gtkIMContextFilterKeypress(s.im, event) {
+		if kind == platform.KeyReleased {
+			// The input method took the release of a key the content
+			// got pressed, as the focus moved to a text input while
+			// the key was held: the key goes up all the same. One it
+			// hands back, as IBus and Fcitx do the keys they leave,
+			// comes again, which held keeps from the content.
+			s.held.Lift(keyvalKey(field[uint32](event, 28)), eventPhysicalKey(event), gdkMods(field[uint32](event, 24)), s.send)
+		}
+		return true
+	}
+	// A modifier key on its own: the state is the one before the
+	// event, so the key's own bit goes in or out, unless the same
+	// modifier of the other side stays held.
+	if bit := modifierKeyval(field[uint32](event, 28)); bit != 0 {
+		state := gdkMods(field[uint32](event, 24))
+		if kind == platform.KeyPressed || s.down.otherSideHeld(keycode) {
+			state |= bit
+		} else {
+			state &^= bit
+		}
+		s.send(platform.SurfaceEvent{Kind: platform.ModifiersChanged, Mods: state})
+		return s.rawKey(kind, event, state, repeat)
+	}
+	k := keyvalKey(field[uint32](event, 28))
+	mods := gdkMods(field[uint32](event, 24))
+	physical := eventPhysicalKey(event)
+	code := eventKeyCode(event)
+	// A key the layout types no US key for, as S on a Cyrillic layout,
+	// still reaches shortcuts by its position.
+	// A release is sent whatever the modifiers held now, so that a press
+	// sent as a chord is let go of even after Ctrl was.
+	if k == platform.KeyUnknown {
+		switch {
+		case kind == platform.KeyReleased && physical != platform.KeyUnknown:
+			s.send(platform.SurfaceEvent{Kind: kind, PhysicalKey: physical, Code: code, Mods: mods})
+			return false
+		case !platform.KeyByPosition(k, physical, mods):
+			return s.rawKey(kind, event, mods, repeat)
+		}
+	}
+	if kind == platform.KeyPressed {
+		s.pressing = event
+		defer func() { s.pressing = 0 }()
+	}
+	s.send(platform.SurfaceEvent{Kind: kind, Key: k, PhysicalKey: physical, Code: code, Mods: mods, Repeat: repeat})
+	return true
+}
+
+// rawKey sends a key shortcuts have no name for, whose keyval tells nothing
+// (a modifier, a lock key, one the layout types no US key for), by its
+// position, and reports whether the content took it.
+func (s *surface) rawKey(kind platform.SurfaceEventKind, event ptr, mods platform.Modifiers, repeat bool) bool {
+	code := eventKeyCode(event)
+	if code == platform.CodeUnknown {
+		return false
+	}
+	raw := platform.RawKeyPressed
+	if kind == platform.KeyReleased {
+		raw = platform.RawKeyReleased
+	}
+	return s.send(platform.SurfaceEvent{Kind: raw, PhysicalKey: eventPhysicalKey(event), Code: code, Mods: mods, Repeat: repeat})
+}
+
 func (b *Backend) surfaceOf(data ptr) *surface {
 	if w := b.window(data); w != nil {
 		return w.surface
@@ -844,6 +1089,7 @@ func initSurfaceCallbacks() {
 		if s.drawsGL() {
 			return false
 		}
+		s.paceFrameClock()
 		s.cr = cr
 		// The frame the tick callback drew, unless GTK resized the area
 		// since; else GTK asked for this draw by itself, and the content
@@ -874,6 +1120,7 @@ func initSurfaceCallbacks() {
 			return false
 		}
 		s.again, s.ticking, s.staged.pix = false, true, nil
+		s.paceFrameClock()
 		s.send(platform.SurfaceEvent{Kind: platform.SurfaceFrame})
 		s.ticking = false
 		if !s.again {
@@ -918,6 +1165,7 @@ func initSurfaceCallbacks() {
 			return false
 		}
 		s.rendering, s.rendered, s.inMemory = true, true, false
+		s.paceFrameClock()
 		s.send(platform.SurfaceEvent{Kind: platform.SurfaceFrame})
 		s.rendering = false
 		if s.renderAgain {
@@ -1005,7 +1253,8 @@ func initSurfaceCallbacks() {
 		if kind == platform.PointerDown {
 			clicks = s.clicks.Press(button, x, y, field[uint32](event, 20), doubleClick())
 		}
-		s.send(platform.SurfaceEvent{Kind: kind, X: x, Y: y, Button: button, Clicks: clicks, Mods: mods})
+		pointer, pressure := eventDevice(event)
+		s.send(platform.SurfaceEvent{Kind: kind, X: x, Y: y, Button: button, Clicks: clicks, Mods: mods, Pointer: pointer, Pressure: pressure})
 		if kind == platform.PointerUp && button == 0 && s.dragRequest == nil && s.lastPointer != 0 {
 			gdkEventFree(s.lastPointer)
 			s.lastPointer = 0
@@ -1021,7 +1270,8 @@ func initSurfaceCallbacks() {
 				}
 				s.lastPointer = gdkEventCopy(event)
 			}
-			s.send(platform.SurfaceEvent{Kind: platform.PointerMove, X: field[float64](event, 24), Y: field[float64](event, 32), Mods: gdkMods(field[uint32](event, 48))})
+			pointer, pressure := eventDevice(event)
+			s.send(platform.SurfaceEvent{Kind: platform.PointerMove, X: field[float64](event, 24), Y: field[float64](event, 32), Mods: gdkMods(field[uint32](event, 48)), Pointer: pointer, Pressure: pressure})
 		}
 		return false
 	})
@@ -1074,63 +1324,9 @@ func initSurfaceCallbacks() {
 		}
 		return true
 	})
-	// GdkEventKey: type 0, state 24, keyval 28, hardware_keycode 48.
 	cbSurfaceKey = purego.NewCallback(func(widget, event, data ptr) bool {
 		s := b().surfaceOf(data)
-		if s == nil {
-			return false
-		}
-		kind := platform.KeyPressed
-		if field[int32](event, 0) == 9 { // GDK_KEY_RELEASE
-			kind = platform.KeyReleased
-		} else {
-			s.clientComposition.Reset()
-			if s.lastKey != 0 {
-				gdkEventFree(s.lastKey)
-			}
-			s.lastKey = gdkEventCopy(event)
-		}
-		if s.rawInput() {
-			if kind == platform.KeyPressed {
-				defer s.typed(event)
-			}
-		} else if s.textInput && gtkIMContextFilterKeypress(s.im, event) {
-			return true
-		}
-		// A modifier key on its own: the state is the one before the
-		// event, so the key's own bit goes in or out.
-		if bit := modifierKeyval(field[uint32](event, 28)); bit != 0 {
-			state := gdkMods(field[uint32](event, 24))
-			if kind == platform.KeyPressed {
-				state |= bit
-			} else {
-				state &^= bit
-			}
-			s.send(platform.SurfaceEvent{Kind: platform.ModifiersChanged, Mods: state})
-			return false
-		}
-		k := keyvalKey(field[uint32](event, 28))
-		mods := gdkMods(field[uint32](event, 24))
-		physical := eventPhysicalKey(event)
-		// A key the layout types no US key for, as S on a Cyrillic layout,
-		// still reaches shortcuts by its position.
-		// A release is sent whatever the modifiers held now, so that a press
-		// sent as a chord is let go of even after Ctrl was.
-		if k == platform.KeyUnknown {
-			switch {
-			case kind == platform.KeyReleased && physical != platform.KeyUnknown:
-				s.send(platform.SurfaceEvent{Kind: kind, PhysicalKey: physical, Mods: mods})
-				return false
-			case !platform.KeyByPosition(k, physical, mods):
-				return false
-			}
-		}
-		if kind == platform.KeyPressed {
-			s.pressing = event
-			defer func() { s.pressing = 0 }()
-		}
-		s.send(platform.SurfaceEvent{Kind: kind, Key: k, PhysicalKey: physical, Mods: mods})
-		return true
+		return s != nil && s.keyEvent(event)
 	})
 	cbSurfaceFocusIn = purego.NewCallback(func(widget, event, data ptr) bool {
 		if s := b().surfaceOf(data); s != nil {
@@ -1144,6 +1340,7 @@ func initSurfaceCallbacks() {
 	cbSurfaceFocusOut = purego.NewCallback(func(widget, event, data ptr) bool {
 		if s := b().surfaceOf(data); s != nil {
 			gtkIMContextFocusOut(s.im)
+			s.down.clear()
 			s.send(platform.SurfaceEvent{Kind: platform.SurfaceBlur})
 		}
 		return false

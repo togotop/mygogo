@@ -161,6 +161,9 @@ func (b *Backend) refocus(old *window) {
 
 func (w *window) Handle() uintptr { return uintptr(w.id) }
 
+// SetVibrancyTint does nothing: phones' windows take no tint.
+func (w *window) SetVibrancyTint(*platform.Color) {}
+
 // ViewID is the number the host knows the window by, which a plugin's native
 // code knows its views by.
 func (w *window) ViewID() int { return w.id }

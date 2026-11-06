@@ -40,6 +40,9 @@ type headless struct {
 	// escapes counts the Escapes nothing handled.
 	escapes int
 	openErr error
+	// clipboardErr fails the writes of text to the clipboard
+	// (FailClipboard).
+	clipboardErr error
 	// later are what the view asked to run after the frame, as a window
 	// posts them to the main thread.
 	later  []func()
@@ -112,7 +115,6 @@ func (h *headless) repaintTimer(at time.Time)                  { h.repaintAt = a
 func (h *headless) setCursor(c Cursor)                         { h.cursor = c }
 func (h *headless) setTextInput(t platform.TextInputState)     { h.ime = t }
 func (h *headless) updateAccessibility(t *platform.AccessTree) { h.keepAccess(t) }
-func (h *headless) writeClipboard(s string)                    { h.clipboard, h.clipboardData = s, transfer.Data{} }
 func (h *headless) startDrag()                                 {}
 func (h *headless) setDropFormats([]transfer.Format)           {}
 func (h *headless) readClipboard() string {
@@ -182,6 +184,21 @@ func (h *headless) invalidate() {
 	h.requested.Store(true)
 }
 
+// writeClipboard copies s, unless FailClipboard set an error;
+// writeClipboardThen gives done that error before the next frame too, as
+// a window gives it after the system wrote the clipboard.
+func (h *headless) writeClipboard(s string) {
+	if h.clipboardErr == nil {
+		h.clipboard, h.clipboardData = s, transfer.Data{}
+	}
+}
+
+func (h *headless) writeClipboardThen(s string, done func(error)) {
+	h.writeClipboard(s)
+	err := h.clipboardErr
+	h.later = append(h.later, func() { done(err) })
+}
+
 // openURL notes the link, and gives done the error FailOpenURL set before
 // the next frame, as a window gives it after the system opened the link.
 func (h *headless) openURL(u string, done func(error)) {
@@ -208,6 +225,8 @@ func (h *headless) popupMenu(m *platform.Menu, x, y float32, chosen func(int)) {
 func (h *headless) placeWebViews(views []placedWebView) {
 	h.webViews = append(h.webViews[:0], views...)
 }
+func (h *headless) nativeGlass() bool                              { return false }
+func (h *headless) placeGlass([]platform.GlassPlacement)           {}
 func (h *headless) tabIntoWebView(v NativeWebView, back bool)      { h.tabbedInto, h.tabbedBack = v, back }
 func (h *headless) platformWebView(NativeWebView) platform.WebView { return nil }
 func (h *headless) image() *image.RGBA {
@@ -239,13 +258,38 @@ type Tester struct {
 	// that of the last frame.
 	now     time.Time
 	frameAt time.Time
+	// pointer and pressure are the device of the pointer's events, and
+	// how hard it presses (UsePointer).
+	pointer  PointerType
+	pressure float32
 }
 
 // NewTester starts testing view in a window of width×height DIPs. Two
 // elements given one key under one parent make it panic where the second
 // was given, as apps only log it.
 func coreNewTester(view func(c *context), width, height int) *Tester {
-	h := &headless{w: float32(width), h: float32(height), scale: 1}
+	return coreNewTesterWith(view, width, height, TesterOptions{})
+}
+
+// TesterOptions are settings of the desktop that a Tester starts with,
+// which its first frame follows, as Media Queries 5 has the user's
+// preferences apply from the first time styles resolve: a view mounted
+// under ReduceMotion starts no animation in its first frames either, as
+// it would before a SetPreferences after NewTester.
+type TesterOptions struct {
+	// Preferences are the desktop's settings that controls follow
+	// (SetPreferences).
+	Preferences Preferences
+	// Dark starts in the dark appearance (SetDark).
+	Dark bool
+}
+
+// NewTesterWith starts testing view in a window of width×height DIPs, as
+// NewTester does, with the desktop's settings of o from the first frame:
+//
+//	tt := ui.NewTesterWith(view, 400, 300, ui.TesterOptions{Preferences: ui.Preferences{ReduceMotion: true}})
+func coreNewTesterWith(view func(c *context), width, height int, o TesterOptions) *Tester {
+	h := &headless{w: float32(width), h: float32(height), scale: 1, prefs: platformPreferences(o.Preferences), dark: o.Dark}
 	t := &Tester{rt: newRuntime(view, h), h: h, now: time.Now()}
 	t.rt.clock = t.Now
 	h.clock = t.Now
@@ -364,6 +408,10 @@ func (t *Tester) timerDue(at, armed time.Time) (time.Time, bool) {
 }
 
 func (t *Tester) send(ev platform.SurfaceEvent) {
+	switch ev.Kind {
+	case platform.PointerMove, platform.PointerDown, platform.PointerUp:
+		ev.Pointer, ev.Pressure = platform.PointerKind(t.pointer), float64(t.pressure)
+	}
 	if ev.Kind == platform.PointerDown && ev.Clicks == 0 {
 		// Counted as a backend counts.
 		ev.Clicks = t.clicks.Press(ev.Button, ev.X, ev.Y, uint32(t.now.UnixMilli()), platform.DefaultDoubleClick)
@@ -426,6 +474,22 @@ func (t *Tester) SetWindowActive(active bool) {
 	t.settle()
 }
 
+// SetWindowHidden hides all of the window from sight, as minimizing it
+// or covering it with other windows does, or shows it again:
+// Context.WindowHidden returns it, and what moves waits while it is
+// hidden.
+func (t *Tester) SetWindowHidden(hidden bool) {
+	if t.h.hidden == hidden {
+		return
+	}
+	t.h.hidden = hidden
+	kind := platform.SurfaceShown
+	if hidden {
+		kind = platform.SurfaceHidden
+	}
+	t.send(platform.SurfaceEvent{Kind: kind})
+}
+
 // SetDark switches between the light and the dark appearance.
 func (t *Tester) SetDark(dark bool) {
 	t.h.dark = dark
@@ -436,10 +500,16 @@ func (t *Tester) SetDark(dark bool) {
 // SetPreferences changes the desktop's settings that controls follow, as
 // the user does in the system's settings.
 func (t *Tester) SetPreferences(p Preferences) {
-	t.h.prefs = platform.Preferences{Accent: platform.Color{R: p.Accent.R, G: p.Accent.G, B: p.Accent.B, A: p.Accent.A}, ReduceMotion: p.ReduceMotion,
-		HighContrast: p.HighContrast, TextScale: float64(p.TextScale)}
+	t.h.prefs = platformPreferences(p)
 	t.rt.themeChanged()
 	t.settle()
+}
+
+// platformPreferences returns p as a backend gives them.
+func platformPreferences(p Preferences) platform.Preferences {
+	return platform.Preferences{Accent: platform.Color{R: p.Accent.R, G: p.Accent.G, B: p.Accent.B, A: p.Accent.A}, ReduceMotion: p.ReduceMotion,
+		ReduceTransparency: p.ReduceTransparency, HighContrast: p.HighContrast, TextScale: float64(p.TextScale),
+		Pointer: platform.PointerAccuracy(p.Pointer), AnyPointer: platform.PointerAccuracy(p.AnyPointer), NoHover: p.NoHover, NoAnyHover: p.NoAnyHover}
 }
 
 // SetLocale makes tag the language the app shows, as mygo.App.SetLocale
@@ -723,12 +793,7 @@ func (t *Tester) ChooseMenuItem(path ...string) error {
 func (t *Tester) CloseMenu() { t.h.menu, t.h.chosen = nil, nil }
 
 // Press presses (x, y) without releasing; Release releases it.
-func (t *Tester) Press(x, y float32) {
-	if t.webViewPress(x, y, 0, 0) {
-		return
-	}
-	t.send(platform.SurfaceEvent{Kind: platform.PointerDown, X: float64(x), Y: float64(y)})
-}
+func (t *Tester) Press(x, y float32) { t.PressButton(0, x, y) }
 
 // PressWith presses the primary button with mods held, as Shift and a drag
 // do, which a chart pans by.
@@ -737,8 +802,21 @@ func (t *Tester) PressWith(mods Modifiers, x, y float32) {
 }
 
 // Release releases the pointer at (x, y).
-func (t *Tester) Release(x, y float32) {
-	t.send(platform.SurfaceEvent{Kind: platform.PointerUp, X: float64(x), Y: float64(y)})
+func (t *Tester) Release(x, y float32) { t.ReleaseButton(0, x, y) }
+
+// PressButton presses (x, y) with the pointer's button, 0 the primary, 1
+// the secondary and 2 the middle, without releasing, as a right-button
+// drag begins; ReleaseButton releases it.
+func (t *Tester) PressButton(button int, x, y float32) {
+	if t.webViewPress(x, y, button, 0) {
+		return
+	}
+	t.send(platform.SurfaceEvent{Kind: platform.PointerDown, X: float64(x), Y: float64(y), Button: button})
+}
+
+// ReleaseButton releases the pointer's button at (x, y).
+func (t *Tester) ReleaseButton(button int, x, y float32) {
+	t.send(platform.SurfaceEvent{Kind: platform.PointerUp, X: float64(x), Y: float64(y), Button: button})
 }
 
 // WebViewAt returns the web view (WebView) that takes the pointer at
@@ -762,6 +840,20 @@ func (t *Tester) webViewPress(x, y float32, button int, mods platform.Modifiers)
 	}
 	t.send(platform.SurfaceEvent{Kind: platform.WebViewPress, X: float64(x), Y: float64(y), Button: button, Mods: mods})
 	return true
+}
+
+// UsePointer has the pointer's presses and moves from now on come from
+// the device pointer pressing with pressure, from 0 to 1, as a pen's, which
+// a system tells: 0 is a mouse's, which tells none. The Tester starts with
+// UsePointer(PointerMouse, 0). Calling it between moves while the pointer
+// presses changes the pressure as a pen pressing harder does:
+//
+//	tt.UsePointer(ui.PointerPen, 0.2)
+//	tt.Press(10, 10)
+//	tt.UsePointer(ui.PointerPen, 0.9)
+//	tt.Move(10, 10) // the pen presses harder where it stands
+func (t *Tester) UsePointer(pointer PointerType, pressure float32) {
+	t.pointer, t.pressure = pointer, pressure
 }
 
 // TouchDown puts a finger on a touch screen at (x, y); TouchMove moves it
@@ -849,6 +941,12 @@ func (t *Tester) KeyDown(key Key) {
 	t.send(platform.SurfaceEvent{Kind: platform.KeyPressed, Key: platform.Key(key)})
 }
 
+// KeyRepeat presses a key with modifiers as its auto-repeat does while
+// it is held down (InputEvent.Repeat, Context.ShortcutRepeated).
+func (t *Tester) KeyRepeat(mods Modifiers, key Key) {
+	t.send(platform.SurfaceEvent{Kind: platform.KeyPressed, Key: platform.Key(key), Mods: platform.Modifiers(mods), Repeat: true})
+}
+
 // KeyUp releases a key KeyDown held.
 func (t *Tester) KeyUp(key Key) {
 	t.send(platform.SurfaceEvent{Kind: platform.KeyReleased, Key: platform.Key(key)})
@@ -860,6 +958,19 @@ func (t *Tester) KeyUp(key Key) {
 func (t *Tester) KeyAt(mods Modifiers, physical Key) {
 	t.send(platform.SurfaceEvent{Kind: platform.KeyPressed, PhysicalKey: platform.Key(physical), Mods: platform.Modifiers(mods)})
 	t.send(platform.SurfaceEvent{Kind: platform.KeyReleased, PhysicalKey: platform.Key(physical), Mods: platform.Modifiers(mods)})
+}
+
+// CodeDown presses a key that only its position names, as a modifier on its
+// own or Caps Lock (InputEvent.Code): mods are the modifiers held with it,
+// its own among them.
+func (t *Tester) CodeDown(mods Modifiers, code KeyCode) {
+	t.send(platform.SurfaceEvent{Kind: platform.RawKeyPressed, Code: platform.KeyCode(code), Mods: platform.Modifiers(mods)})
+}
+
+// CodeUp lets go of a key CodeDown pressed: mods are the modifiers still
+// held.
+func (t *Tester) CodeUp(mods Modifiers, code KeyCode) {
+	t.send(platform.SurfaceEvent{Kind: platform.RawKeyReleased, Code: platform.KeyCode(code), Mods: platform.Modifiers(mods)})
 }
 
 // TypeKey presses a key that types text, as a keyboard does: the key goes
@@ -941,6 +1052,12 @@ func (t *Tester) Cursor() Cursor { return t.h.cursor }
 
 // OpenedURLs returns the links the view opened.
 func (t *Tester) OpenedURLs() []string { return t.h.opened }
+
+// FailClipboard makes the view's writes of text to the clipboard from now
+// on fail with err, copying nothing, as a browser refuses them without
+// the user acting (Context.WriteClipboardThen); nil lets them through
+// again.
+func (t *Tester) FailClipboard(err error) { t.h.clipboardErr = err }
 
 // FailOpenURL makes the links the view opens from now on fail with err, as
 // those no app opens, or opens them again for nil.

@@ -161,6 +161,11 @@ type WindowOptions struct {
 	// material can show one, and it has no menu bar: Alt and F10 open its
 	// menus in a popup.
 	Vibrancy Vibrancy
+	// VibrancyTint tints the material, in the syntax of BackgroundColor:
+	// "#80ff0000", "rgba(255, 0, 0, 0.5)", or "light-dark(...)" to follow
+	// the appearance. Only macOS 26's Liquid Glass takes a tint; other
+	// materials and platforms ignore it.
+	VibrancyTint string
 	// CornerRadius rounds a frameless window's corners on macOS, in DIPs:
 	// its content and material are cut to them, and its shadow follows
 	// them, as a launcher's or a floating panel's. The window need not be
@@ -308,11 +313,14 @@ type Window struct {
 	// pg is the window's page, which Page returns unless the window shows
 	// native UI.
 	pg *Page
-	// content is WindowOptions.Content; conn connects it to the native
+	// content tells that the window shows WindowOptions.Content, which
+	// the window hands to its surface as it attaches it and keeps no
+	// reference to: the Content's view, and all it reaches, stays only as
+	// long as the window is open (#1281). conn connects it to the native
 	// surface (main thread only). devTools tells that PageOptions.DevTools
 	// turned the developer tools on: the web inspector, or the inspector
 	// of the Content.
-	content      Content
+	content      bool
 	conn         *surface.Conn
 	devTools     bool
 	invalidating atomic.Bool
@@ -341,6 +349,8 @@ type Window struct {
 	showLater, framing bool
 	// background is the BackgroundColor, if any. Main thread only.
 	background *background
+	// vibrancyTint is VibrancyTint, if any. Main thread only.
+	vibrancyTint *background
 	// hiddenTitleBar is a TitleBarStyle that hides the title bar: the pages
 	// hear the room the window controls take. Main thread only.
 	hiddenTitleBar bool
@@ -486,12 +496,16 @@ func NewWindow(opts WindowOptions) *Window {
 	if err != nil {
 		panic(err)
 	}
-	return createWindow("NewWindow", opts, bg, nil)
+	tint, err := backgroundOption(opts.VibrancyTint)
+	if err != nil {
+		panic(err)
+	}
+	return createWindow("NewWindow", opts, bg, tint, nil)
 }
 
 // createWindow creates a window, or a flyout, once the application is
 // ready.
-func createWindow(caller string, opts WindowOptions, bg *background, flyout *flyoutOptions) *Window {
+func createWindow(caller string, opts WindowOptions, bg, tint *background, flyout *flyoutOptions) *Window {
 	main := isMainThread()
 	if !main {
 		App.waitReady()
@@ -500,7 +514,7 @@ func createWindow(caller string, opts WindowOptions, bg *background, flyout *fly
 	}
 	var w *Window
 	onMain(func() {
-		w = newWindow(opts, bg, 0, flyout)
+		w = newWindow(opts, bg, tint, 0, flyout)
 		if !main {
 			// Called from another goroutine, NewWindow returns while the
 			// main thread goes on drawing: the window of native UI shows
@@ -541,6 +555,19 @@ func (w *Window) backgroundColor() *platform.Color {
 	return &c
 }
 
+// vibrancyTintColor returns the window's material tint for the current
+// appearance, or nil. Main thread only.
+func (w *Window) vibrancyTintColor() *platform.Color {
+	if w.vibrancyTint == nil {
+		return nil
+	}
+	c := w.vibrancyTint.light
+	if w.vibrancyTint.dark != c && backend().Theme().IsDark() {
+		c = w.vibrancyTint.dark
+	}
+	return &c
+}
+
 // updateBackgrounds gives windows with a light and a dark background the
 // one of the current appearance. Main thread only.
 func updateBackgrounds() {
@@ -548,16 +575,19 @@ func updateBackgrounds() {
 		if bg := w.background; w.native != nil && bg != nil && bg.light != bg.dark {
 			w.native.SetBackgroundColor(*w.backgroundColor())
 		}
+		if tint := w.vibrancyTint; w.native != nil && tint != nil && tint.light != tint.dark {
+			w.native.SetVibrancyTint(w.vibrancyTintColor())
+		}
 	}
 }
 
-func newWindow(opts WindowOptions, bg *background, native uintptr, flyout *flyoutOptions) *Window {
+func newWindow(opts WindowOptions, bg, tint *background, native uintptr, flyout *flyoutOptions) *Window {
 	windows.Lock()
 	windows.nextID++
 	id := windows.nextID
 	windows.Unlock()
 
-	w := &Window{id: id, parent: opts.Parent, trustedOrigins: opts.Page.TrustedOrigins, untrusted: opts.Page.Untrusted, secret: randomText(), stateKey: opts.StateKey, background: bg, content: opts.Content, panel: opts.Panel && flyout == nil, active: true}
+	w := &Window{id: id, parent: opts.Parent, trustedOrigins: opts.Page.TrustedOrigins, untrusted: opts.Page.Untrusted, secret: randomText(), stateKey: opts.StateKey, background: bg, vibrancyTint: tint, content: opts.Content != nil, panel: opts.Panel && flyout == nil, active: true}
 	w.pg = &Page{w}
 	if flyout != nil {
 		w.fit = flyout.fit
@@ -613,8 +643,8 @@ func newWindow(opts WindowOptions, bg *background, native uintptr, flyout *flyou
 	if w.stateKey != "" {
 		w.initState(popts)
 	}
-	if w.content != nil {
-		w.attachContent()
+	if w.content {
+		w.attachContent(opts.Content)
 	} else {
 		startContentRules(nw, opts.Page.ContentRules)
 	}
@@ -624,12 +654,12 @@ func newWindow(opts WindowOptions, bg *background, native uintptr, flyout *flyou
 	windows.Unlock()
 
 	fire1(&App.onWindowCreated, w)
-	if w.content == nil {
+	if !w.content {
 		w.loadPage(opts.Page.SessionState, opts.URL)
 	}
 	switch {
 	case opts.Hidden:
-	case w.content != nil:
+	case w.content:
 		// The window of native UI shows, and its view runs for the first
 		// frame, once NewWindow returned on the main thread, so that the
 		// view can use what NewWindow returns (#1053): shown now, the
@@ -677,6 +707,7 @@ func (w *Window) platformOptions(o *WindowOptions) *platform.WindowOptions {
 		TitleBarHeight:    max(o.TitleBarHeight, 0),
 		HideWindowButtons: o.HideWindowButtons,
 		Vibrancy:          string(o.Vibrancy),
+		VibrancyTint:      w.vibrancyTintColor(),
 		CornerRadius:      max(o.CornerRadius, 0),
 		Opacity:           o.Opacity,
 		Modal:             o.Modal,
@@ -1292,6 +1323,22 @@ func (w *Window) SetVibrancy(v Vibrancy) {
 	w.Invalidate()
 }
 
+// SetVibrancyTint tints the window's material, in the syntax of
+// BackgroundColor, or "" to remove the tint. Only macOS 26's Liquid Glass
+// takes one; other materials and platforms ignore it. See
+// WindowOptions.VibrancyTint.
+func (w *Window) SetVibrancyTint(color string) error {
+	tint, err := backgroundOption(color)
+	if err != nil {
+		return err
+	}
+	w.do(func(n platform.Window) {
+		w.vibrancyTint = tint
+		n.SetVibrancyTint(w.vibrancyTintColor())
+	})
+	return nil
+}
+
 // ProgressState is the state of a progress bar; see ProgressBar.
 type ProgressState string
 
@@ -1393,7 +1440,7 @@ func (w *Window) NativeHandle() uintptr { return get(w, platform.Window.Handle) 
 // SetFrontend). Besides http(s) URLs, schemes registered with
 // Protocol.Handle can be used.
 func (p *Page) LoadURL(rawURL string) error {
-	if p.w.content != nil {
+	if p.w.content {
 		return errNoPage
 	}
 	resolved, err := resolveURL(rawURL)
@@ -1411,7 +1458,7 @@ func (p *Page) LoadURL(rawURL string) error {
 // working directory, then against the directory of the executable (and the
 // Resources directory of a macOS app bundle).
 func (p *Page) LoadFile(path string) error {
-	if p.w.content != nil {
+	if p.w.content {
 		return errNoPage
 	}
 	abs, err := resolveFile(path)
@@ -1605,7 +1652,7 @@ func (p *Page) Print() { p.w.page(platform.Window.Print) }
 // CapturePage returns a PNG screenshot of the visible page. For a window
 // showing Content it renders the content as it is.
 func (w *Window) CapturePage() ([]byte, error) {
-	if w.content != nil {
+	if w.content {
 		return w.captureContent()
 	}
 	type result struct {
@@ -1746,7 +1793,7 @@ const maxHeldEvents = 1024
 // the DOM of the page is ready; replies to calls are sent right away since
 // the page is waiting for them.
 func (w *Window) enqueue(msg message, event bool) {
-	if w.content != nil {
+	if w.content {
 		return
 	}
 	w.outMu.Lock()
@@ -2128,7 +2175,11 @@ func (h *windowHandler) NewWindow(req platform.NewWindowRequest) platform.Window
 	if err != nil {
 		log.Printf("mygo: window open handler: %v", err)
 	}
-	child := newWindow(o, bg, req.Native, nil)
+	tint, err := backgroundOption(o.VibrancyTint)
+	if err != nil {
+		log.Printf("mygo: window open handler: %v", err)
+	}
+	child := newWindow(o, bg, tint, req.Native, nil)
 	return child.native
 }
 

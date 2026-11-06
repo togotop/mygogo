@@ -30,6 +30,11 @@ ui.Column(c).Padding(18).Gap(12).Radius(10).
   	Shadow(0, 8, 24, 0, ui.RGBA(0, 0, 0, 0.3)).
   	InsetShadow(0, 0, 1, 0, ui.RGBA(255, 255, 255, 0.2))
   ```
+
+  `NoShadow()` takes off the shadows added so far, as `box-shadow: none`,
+  to flatten a card a helper returned with one; shadows added after it
+  start afresh. A [transition](transitions.md#what-moves) fades shadows
+  as they change.
 - **Gradients and stripes.** `Gradient(from, to, angle)` fills the box with
   a linear gradient; `LinearGradient` also places its colors along the line
   (`Start`, `End`) and mixes them in Oklab, which keeps their lightness,
@@ -64,6 +69,20 @@ ui.Column(c).Padding(18).Gap(12).Radius(10).
   what is unavailable. A painter fills rectangles and paths with the same
   gradients (`FillGradient`, `FillConicGradient`, `FillRadialGradient`,
   `FillPathGradient`, `FillPathConicGradient`, `StrokePathConicGradient`).
+- **Opacity.** `Opacity(o)` fades the element and its children as one
+  group, as CSS's `opacity`: what they paint is put together first, then
+  faded, so a badge over a card's edge, or two bars of a chart that
+  overlap, show as one, not each through the other.
+
+  ```go
+  ui.Row(c).Gap(8).Children(func() { /* … */ }).Opacity(0.5) // a toolbar, faded
+  ```
+
+  Children that overlap nothing paint faded each on their own, which
+  looks the same at no cost; where they overlap, they render into a
+  bitmap of the GPU first, as a blur's, its text smoothed in grayscale.
+  Web views, and materials that show what is behind them, fade on their
+  own, as no bitmap shows them; so does what `Disabled` dims.
 - **Blur.** `Blur(sigma)` blurs the element and its children, as CSS's
   `filter: blur()`: what they draw spreads about 3 sigma DIPs around,
   transparent beyond, on the GPU. They render into a bitmap first, as an
@@ -111,10 +130,47 @@ ui.Column(c).Padding(18).Gap(12).Radius(10).
 
   The end of clamped text fades the same way, along its width:
   `MaskLinearGradient(ui.LinearGradient{Angle: 90, Stops: …})`.
-  Like `Opacity`, the mask applies to each thing drawn on its own; the
+  Unlike `Opacity`, the mask applies to each thing drawn on its own; the
   element isn't drawn into a layer first. So where a row's background
   is faded, what is under the row shows through it too. Clicks are not
   masked.
+- **Layers of masks.** `Masks` masks the element by several layers, as
+  CSS's `mask-image` with `mask-composite`: each a gradient (a
+  `ui.Mask`'s `Image`, a `LinearGradient`, `RadialGradient` or
+  `ConicGradient`) across the border box, or across the padding box or the
+  content box (its `Box`, as `mask-origin` and `mask-clip`), the first
+  on top. Each layer goes with those under it, after it in the list, as
+  its `Composite` says: `MaskAdd`, by default, shows what either shows,
+  `MaskSubtract` the layer where those under it don't show, `MaskIntersect`
+  where both do, and `MaskExclude` where one does but not both. A
+  gradient ring 1.5 DIPs wide, the content box cut out of the border box,
+  as the gradient-border trick of CSS:
+
+  ```go
+  black := ui.RGB(0, 0, 0)
+  solid := ui.LinearGradient{From: black, To: black}
+  ui.Box(c).Size(120, 40).Radius(20).Padding(1.5).Gradient(pink, violet, 90).Masks(
+  	ui.Mask{Image: solid, Box: ui.MaskContentBox, Composite: ui.MaskExclude},
+  	ui.Mask{Image: solid},
+  )
+  ```
+
+  and a crescent, a disc less another beside it:
+
+  ```go
+  disc := func(x, y float32) ui.RadialGradient {
+  	return ui.RadialGradient{Center: ui.Point{X: x, Y: y}, Radius: 40,
+  		Stops: []ui.GradientStop{{black, 0.98}, {ui.Transparent, 1}}}
+  }
+  moon := ui.Box(c).Size(80, 80).Background(t.Text)
+  moon.Masks(ui.Mask{Image: disc(0.5, 0.5), Composite: ui.MaskSubtract}, ui.Mask{Image: disc(0.7, 0.35)})
+  ```
+
+  `Masks` replaces the gradient masks above, and they replace it. One
+  layer across the border box masks as they do; more make a mask of their
+  alpha, on the CPU, once for each size the element shows at, which each
+  renderer draws as a path's clip. Like a gradient mask, it applies to
+  each thing drawn on its own.
 - **Caching.** `Cache()` keeps what the element and its children paint in
   a bitmap of the GPU, as Flutter's `RepaintBoundary` and SwiftUI's
   `drawingGroup()` do, drawn again only when what they paint changes:
@@ -141,7 +197,16 @@ ui.Column(c).Padding(18).Gap(12).Radius(10).
   resize cursors (both ways, toward one side as `CursorResizeE`, and of
   columns and rows), `CursorCopy` and `CursorAlias` for drops,
   `CursorContextMenu`, `CursorVerticalText`, `CursorNotAllowed`,
-  `CursorCrosshair`, and `CursorNone`, which hides it. An element's
+  `CursorCrosshair`, `CursorNone`, which hides it, CSS's `progress` and
+  `wait` (`CursorProgress` over a control that is busy but still takes
+  input, as one with `aria-busy`, and `CursorWait` while nothing can be
+  done), `CursorHelp`, `CursorCell`, `CursorZoomIn` and `CursorZoomOut`,
+  `CursorAllScroll` and `CursorNoDrop`. Windows has no cursors for
+  zooming and cells, which MyGo draws, as browsers bring their own;
+  macOS has `CursorWait`, `CursorHelp`, the zoom cursors and
+  `CursorAllScroll` among AppKit's private cursors, as WebKit uses them,
+  and shows the nearest public one where a version lacks them (the
+  crosshair for `CursorCell`). An element's
   cursor shows over its children too, except over those that take clicks
   (a button, or anything with `Clicked` or `OnClick`): those show their
   own, the default arrow unless they set one, so the buttons of a field
@@ -304,3 +369,31 @@ theme follows and a frame follows the changes of:
   times larger.
 - **`ReduceMotion`.** macOS's Reduce Motion, Windows's animation effects and
   GNOME's animations turned off: `Animate` goes to its target at once.
+- **`Pointer`, `AnyPointer`, `Hover()` and `AnyHover()`.** What the
+  pointing devices can do, as Media Queries 4's `pointer`, `any-pointer`,
+  `hover` and `any-hover`: `Pointer` is how accurately the primary one
+  points, `ui.PointerFine` for a mouse, a touchpad or a pen,
+  `ui.PointerCoarse` for a touch screen, `ui.PointerNone` for none, and
+  `AnyPointer` the most accurate of all; `NoHover` and `NoAnyHover`
+  (`Hover()` and `AnyHover()` the other way round) tell that the primary
+  one, or every one, cannot hover. A touch-first layout gives larger
+  targets to a coarse pointer, and shows on hover alone only what a
+  pointer that hovers can reach:
+
+  ```go
+  p := c.Preferences()
+  size := float32(28)
+  if p.Pointer == ui.PointerCoarse {
+  	size = 44
+  }
+  del := ui.Button(c, "×").Size(size, size).Label("Delete")
+  if p.Hover() {
+  	del.Tooltip("Delete")
+  }
+  ```
+
+  Linux reads the seat's devices (GDK's), and follows them as they come
+  and go; Windows reads whether a mouse, a pen or a touch screen is
+  there, the touch screen being the primary one in tablet mode; browsers
+  answer the media queries. macOS's, and those not known, are a mouse's:
+  fine, and hovering.

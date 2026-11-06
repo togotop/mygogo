@@ -139,7 +139,14 @@ seed := filepath.Join(dir, "seed.db")
 ```
 
 `mygo dev` copies them into the development app too, and rebuilds it when
-they change. Hidden files are left out.
+they change. A dotfile inside a resource directory ships: packages read
+such names, as dsh's provider catalog reads
+`dist/providers/data/.manifest.json`. Hidden directories (`.git`, `.cache`)
+are left out, and so are `.DS_Store`, `Thumbs.db` and `desktop.ini`, and
+the top-level entries of `resources` whose names start with a dot, which
+belong to the repository rather than the app. A dotfile you would rather
+not ship, such as a `.env` beside a resource, is left out with
+[`resourcesExclude`](#leaving-files-out).
 
 ### Leaving files out
 
@@ -580,6 +587,11 @@ command, `/usr/bin/my-app` from the package and `~/.local/bin/my-app` from
 [`install.sh`](#the-install-script), or several, as `["my-app", "ma"]`,
 which adds a short name; without it, neither adds a command, which leaves
 the name to a command-line tool of the same name, such as the app's own.
+
+The desktop entry names the window class of the app, `StartupWMClass`,
+as the executable of `command`: an X11 session groups the window with the
+entry and shows its icon in the taskbar, where Wayland matches the same
+name as the app id.
 
 Keep the slug of a released app. Its Linux files are named after it, and
 an update replaces the files of the same names: one to a version with

@@ -85,22 +85,22 @@ func cursorOf(shape int) ui.Cursor {
 	shapes := [...]ui.Cursor{
 		ui.CursorDefault,      // default
 		ui.CursorContextMenu,  // context-menu
-		ui.CursorDefault,      // help
+		ui.CursorHelp,         // help
 		ui.CursorPointer,      // pointer
-		ui.CursorDefault,      // progress
-		ui.CursorDefault,      // wait
-		ui.CursorCrosshair,    // cell
+		ui.CursorProgress,     // progress
+		ui.CursorWait,         // wait
+		ui.CursorCell,         // cell
 		ui.CursorCrosshair,    // crosshair
 		ui.CursorText,         // text
 		ui.CursorVerticalText, // vertical-text
 		ui.CursorAlias,        // alias
 		ui.CursorCopy,         // copy
 		ui.CursorMove,         // move
-		ui.CursorNotAllowed,   // no-drop
+		ui.CursorNoDrop,       // no-drop
 		ui.CursorNotAllowed,   // not-allowed
 		ui.CursorGrab,         // grab
 		ui.CursorGrabbing,     // grabbing
-		ui.CursorMove,         // all-scroll
+		ui.CursorAllScroll,    // all-scroll
 		ui.CursorResizeColumn, // col-resize
 		ui.CursorResizeRow,    // row-resize
 		ui.CursorResizeN,      // n-resize
@@ -115,8 +115,8 @@ func cursorOf(shape int) ui.Cursor {
 		ui.CursorResizeNS,     // ns-resize
 		ui.CursorResizeNESW,   // nesw-resize
 		ui.CursorResizeNWSE,   // nwse-resize
-		ui.CursorDefault,      // zoom-in
-		ui.CursorDefault,      // zoom-out
+		ui.CursorZoomIn,       // zoom-in
+		ui.CursorZoomOut,      // zoom-out
 	}
 	if shape < 0 || shape >= len(shapes) {
 		return ui.CursorDefault
@@ -153,12 +153,15 @@ type view struct {
 
 	// The grid, in device pixels: the cells, the baseline in a cell, and
 	// the origin of the grid relative to the element; scale is device
-	// pixels per DIP, and size the element's in DIPs.
+	// pixels per DIP, and size the element's in DIPs. fitW is the width of
+	// a cell at the font's own advance, which glyphs too wide for their
+	// cells shrink to, whatever Font.CellWidth makes the cells.
 	size                   [2]float32
 	font                   fontKey
 	fonts                  [4]ui.Font
 	scale                  float32
 	cellW, cellH, baseline int
+	fitW                   int
 	ox, oy                 int
 	cols, rows             int
 
@@ -319,7 +322,17 @@ func (v *view) build(c *ui.Context, e ui.Element) {
 	term := t.term
 	searching := term != nil && t.find.drive(term)
 	searched := t.find.status
+	// A synchronized update that does not end shows a second after it
+	// started (paint). Nothing else may ask for that frame: a program that
+	// writes nothing more, its cursor hidden or not blinking, asks for none.
+	var holdDue time.Time
+	if term != nil && t.held {
+		holdDue = t.heldSince.Add(time.Second)
+	}
 	t.mu.Unlock()
+	if !holdDue.IsZero() {
+		c.After(max(time.Until(holdDue), 0) + time.Millisecond)
+	}
 	if searched != v.searched {
 		v.searched = searched
 		if t.opts.OnSearch != nil {
@@ -645,6 +658,9 @@ func (v *view) input(ev ui.InputEvent) bool {
 var goos = runtime.GOOS
 
 func (v *view) keyDown(ev ui.InputEvent) bool {
+	if ev.Key == ui.KeyUnknown {
+		return false // a modifier on its own, or a key of no name
+	}
 	t := v.t
 	if on := t.opts.OnKey; on != nil && on(ev.Mods, ev.Key) {
 		k, _ := vtKey(ev.Key)
@@ -785,6 +801,9 @@ func (v *view) clearScreen() bool {
 }
 
 func (v *view) keyUp(ev ui.InputEvent) bool {
+	if ev.Key == ui.KeyUnknown {
+		return false
+	}
 	k, unshifted := vtKey(ev.Key)
 	if p := v.pending; p != nil && p.taken && p.key == k {
 		// The release of a key OnKey or a keybind took, Command held or
@@ -845,17 +864,23 @@ func (v *view) typed(text string) {
 		v.sendText(text)
 		return
 	}
+	mods := p.mods
+	if goos == "windows" && mods&(ui.Ctrl|ui.Alt) == ui.Ctrl|ui.Alt {
+		// AltGr made the character: the encoder would make a Control
+		// sequence of it with Control held, consumed or not (#1203).
+		mods &^= ui.Ctrl | ui.Alt
+	}
 	var consumed vt.Mods
 	r, _ := utf8.DecodeRuneInString(text)
 	if r != p.unshifted {
 		// Shift or Option made the character.
-		consumed = vtMods(p.mods & (ui.Shift | ui.Alt))
+		consumed = vtMods(mods & (ui.Shift | ui.Alt))
 	}
 	action := vt.KeyPress
 	if p.repeat {
 		action = vt.KeyRepeat
 	}
-	v.sendKey(vt.KeyEvent{Action: action, Key: p.key, Mods: vtMods(p.mods), Consumed: consumed, Text: text, Unshifted: p.unshifted})
+	v.sendKey(vt.KeyEvent{Action: action, Key: p.key, Mods: vtMods(mods), Consumed: consumed, Text: text, Unshifted: p.unshifted})
 }
 
 // sendKey sends a key, scrolling to the bottom and clearing the selection

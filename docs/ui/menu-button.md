@@ -4,7 +4,7 @@
 
 `ui.MenuButton` creates a button showing a label and an arrow, which opens
 a menu of the system's below it, as the system's pop-up buttons do: as the
-pointer goes down on it, or for Enter, Space or Down while it has the
+pointer goes down on it, or for Enter, Space, Up or Down while it has the
 keyboard focus. The function builds the items when the menu opens, and runs
 again in the frame after one was chosen, where its `Chosen` reports it:
 
@@ -76,7 +76,7 @@ row.Children(func() {
 ```
 
 It opens as the system's would, as the pointer goes down on the button,
-and for Enter, Space or Down while the button has the focus: below the
+and for Enter, Space, Up or Down while the button has the focus: below the
 button, lined up with its start, or above it where the window has no room.
 Pressing the button again closes it. It has the keys, the focus and the
 look of `PopoverMenu`'s: it takes the focus as it opens, on its first
@@ -141,7 +141,7 @@ m.Popup(func(panel ui.Element) {
 
 It has the keys and the focus of `PopoverMenuButton`'s, which is built on
 the same parts with the theme's look: it opens as the pointer goes down
-on the button, and for Enter, Space or Down while the button has the
+on the button, and for Enter, Space, Up or Down while the button has the
 focus, on its first item then; Up, Down, Home, End and typing the first
 letters of an item move the highlight, past items `Disabled`; Right and
 Left open and close submenus, the other way round right to left; Enter
@@ -153,6 +153,34 @@ items and radio items, checked as `CheckItem` and `RadioItem` say, and
 each submenu named by its item. Separators and headings are elements of
 your own between the items. See [custom widgets](custom-widgets.md), and
 [`ContextMenuBase`](context-menu.md#without-a-look) for a context menu.
+
+An item that `KeepOpen` leaves the menu open as it is chosen, by the
+pointer, Enter or Space: its `Clicked` reports the choice, and it stays
+highlighted, as Radix's menus do when `onSelect` prevents the default.
+`Group` makes a row of items that the keys take as one: Up and Down stop
+at it once, on its item checked, else its first, and Left and Right move
+among its items, round, the other way round right to left. A theme
+switcher in an account menu is such a row of radio items:
+
+```go
+m.Group(func(row ui.Element) {
+	row.Gap(2).Padding(4).Label("Theme")
+	for _, th := range []string{"Light", "Dark", "System"} {
+		item := m.RadioItem(app.theme == th).KeepOpen().Grow(1).Padding(4, 8).Radius(6)
+		if item.Highlighted() {
+			item.Background(t.SurfaceHover)
+		}
+		item.Children(func() { ui.Text(c, th) })
+		if item.Clicked() {
+			app.theme = th
+		}
+	}
+})
+```
+
+Assistive technology sees a group, named by its `Label`, holding radio
+items counted on their own (the items outside groups are counted
+together).
 
 ## Accessibility
 

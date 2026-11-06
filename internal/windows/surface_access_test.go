@@ -93,13 +93,68 @@ func TestUIATreeAnnouncer(t *testing.T) {
 	if got := ids(tree.root.children); !slices.Equal(got, []uint64{1, announcerID}) {
 		t.Fatalf("the root's children %v", got)
 	}
+	// Alerts go into an assertive region of their own, after it.
+	frame = accessTree(2)
+	frame.Alerts = []string{"Name is required", "Too short"}
+	tree.update(frame)
+	tree.update(accessTree(2))
+	e := tree.nodes[alerterID]
+	if e == nil || e.n.Label != "Name is required Too short" {
+		t.Fatal("the alerts' region left the tree")
+	}
+	var live variant
+	if e.property(uiaLiveSettingProperty, &live); live.Val != 2 {
+		t.Errorf("the alerts' live setting %d, want assertive", live.Val)
+	}
+	if got := ids(tree.root.children); !slices.Equal(got, []uint64{1, announcerID, alerterID}) {
+		t.Fatalf("the root's children %v", got)
+	}
 	for _, n := range tree.withAnnouncer[:cap(tree.withAnnouncer)] {
 		if n.Label != "" {
 			t.Fatalf("the nodes with the announcer keep %q", n.Label)
 		}
 	}
-	if tree.announcerTree.Nodes != nil || tree.announcerTree.Announcements != nil {
+	if tree.announcerTree.Nodes != nil || tree.announcerTree.Announcements != nil || tree.announcerTree.Alerts != nil {
 		t.Fatal("the tree with the announcer is kept")
+	}
+}
+
+// Landmarks are groups whose LandmarkType says which, and whose AriaRole
+// names them: the navigation and search landmarks have types of their
+// own, a region the custom one.
+func TestUIALandmarks(t *testing.T) {
+	for role, want := range map[platform.AccessRole]uint64{
+		platform.RoleNavigation: 80003, // UIA_NavigationLandmarkTypeId
+		platform.RoleSearch:     80004, // UIA_SearchLandmarkTypeId
+		platform.RoleRegion:     80000, // UIA_CustomLandmarkTypeId
+	} {
+		e := &uiaElement{n: platform.AccessNode{Role: role, Label: "Landmark"}}
+		var v variant
+		if e.property(uiaLandmarkTypeProperty, &v); v.VT != vtI4 || v.Val != want {
+			t.Errorf("role %d: landmark type %d, want %d", role, v.Val, want)
+		}
+		if uiaControlTypes[role] != 50026 || ariaRoles[role] == "" {
+			t.Errorf("role %d: control type %d, ARIA role %q", role, uiaControlTypes[role], ariaRoles[role])
+		}
+	}
+}
+
+// An article is a group that says it is one, but no landmark.
+func TestUIAArticle(t *testing.T) {
+	e := &uiaElement{n: platform.AccessNode{Role: platform.RoleArticle, Label: "Post by Ann"}}
+	var v variant
+	if e.property(uiaControlTypeProperty, &v); v.Val != 50026 {
+		t.Errorf("control type %d, want Group", v.Val)
+	}
+	for _, id := range []int{uiaLocalizedControlProperty, uiaAriaRoleProperty} {
+		v = variant{}
+		if e.property(id, &v); v.VT != vtBSTR || bstrString(uintptr(v.Val)) != "article" {
+			t.Errorf("property %d %+v, want \"article\"", id, v)
+		}
+	}
+	v = variant{}
+	if e.property(uiaLandmarkTypeProperty, &v); v.VT != vtEmpty {
+		t.Errorf("an article's landmark type %+v, want none", v)
 	}
 }
 
@@ -155,5 +210,68 @@ func BenchmarkUIATreeUpdate(b *testing.B) {
 				tree.update(frame)
 			}
 		})
+	}
+}
+
+// A range with a text for its value (aria-valuetext) gives it through the
+// Value pattern beside RangeValue; one without has RangeValue alone.
+func TestUIARangeValueText(t *testing.T) {
+	for _, c := range []struct {
+		value string
+		want  bool
+	}{{"30 percent", true}, {"", false}} {
+		e := &uiaElement{n: platform.AccessNode{Role: platform.RoleSlider, Max: 100, Now: 30, Value: c.value}}
+		if !e.supports(ifaceRangeValue) {
+			t.Errorf("value %q: no RangeValue", c.value)
+		}
+		if got := e.supports(ifaceValue); got != c.want {
+			t.Errorf("value %q: Value pattern %v, want %v", c.value, got, c.want)
+		}
+	}
+}
+
+// The ARIA states of #1181 as UI Automation reads them: a role
+// description in LocalizedControlType, a popup in ExpandCollapse and
+// AriaProperties, a sort in ItemStatus, what a button controls in
+// ControllerFor, and a cell chosen in its table's Selection.
+func TestUIAStates(t *testing.T) {
+	tree := newTestTree(t, false)
+	tree.update(&platform.AccessTree{Nodes: []platform.AccessNode{
+		{ID: 1, Parent: -1, Role: platform.RoleGroup, Label: "Highlights", RoleDescription: "carousel"},
+		{ID: 2, Parent: -1, Role: platform.RoleButton, Label: "Fruit", HasPopup: platform.PopupListBox, Controls: []uint64{3, 99}},
+		{ID: 3, Parent: -1, Role: platform.RoleTable, Label: "Days", States: platform.AccessSelectable},
+		{ID: 4, Parent: 2, Role: platform.RoleRow},
+		{ID: 5, Parent: 3, Role: platform.RoleColumnHeader, Label: "Day", States: platform.AccessSortOther},
+		{ID: 6, Parent: 3, Role: platform.RoleCell, Label: "2", States: platform.AccessSelectable | platform.AccessChecked},
+	}})
+	text := func(id uint64, property int) string {
+		var v variant
+		tree.nodes[id].property(property, &v)
+		if v.VT != vtBSTR {
+			return ""
+		}
+		return bstrString(uintptr(v.Val))
+	}
+	if got := text(1, uiaLocalizedControlProperty); got != "carousel" {
+		t.Errorf("the carousel's control type %q", got)
+	}
+	if got := text(2, uiaAriaPropertiesProperty); got != "haspopup=listbox" {
+		t.Errorf("the button's ARIA properties %q", got)
+	}
+	if !tree.nodes[2].supports(ifaceExpandCollapse) {
+		t.Error("the button opening a list box does not expand")
+	}
+	if got := text(5, uiaItemStatusProperty); got != "other" {
+		t.Errorf("the header's item status %q", got)
+	}
+	var v variant
+	if tree.nodes[2].property(uiaControllerForProperty, &v); v.VT != vtArray|vtUnknown || v.Val == 0 {
+		t.Errorf("the button controls %+v", v)
+	}
+	if day := tree.nodes[6]; !day.supports(ifaceSelectionItem) || day.container() != tree.nodes[3] {
+		t.Error("the day is not chosen in its table")
+	}
+	if chosen := tree.nodes[3].chosen(); len(chosen) != 1 || chosen[0].n.ID != 6 {
+		t.Errorf("the table chose %v", ids(chosen))
 	}
 }

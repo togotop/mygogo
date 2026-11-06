@@ -11,3 +11,4 @@ packages/cli/npm/*/bin/
 mygo.ts
 docs/local/
 third_party/
+benchmarks/*/target/

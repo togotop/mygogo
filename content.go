@@ -30,18 +30,16 @@ type Content interface {
 // whose page keeps its own focus.
 func (w *Window) ClearFocus() {
 	onMain(func() {
-		if w.conn == nil {
+		if w.conn == nil || w.conn.ClearFocus == nil {
 			return
 		}
-		if c, ok := w.content.(interface{ ClearFocus(*surface.Conn) }); ok {
-			c.ClearFocus(w.conn)
-		}
+		w.conn.ClearFocus()
 	})
 }
 
 // attachContent connects the window's Content to its surface. Main thread
 // only.
-func (w *Window) attachContent() {
+func (w *Window) attachContent(content Content) {
 	s := w.native.Surface()
 	if s == nil {
 		panic("mygo: the backend " + backend().Name() + " created no surface for the window's Content")
@@ -117,7 +115,7 @@ func (w *Window) attachContent() {
 	if f := w.fit; f != nil && f.native != nil && w.flyout != nil {
 		f.native(w, w.conn)
 	}
-	w.content.AttachContent(w.conn)
+	content.AttachContent(w.conn)
 }
 
 // contentMenu returns the items of a context menu of the Content, whose
@@ -126,6 +124,9 @@ func contentMenu(m *platform.Menu, chosen func(int)) []*MenuItem {
 	items := make([]*MenuItem, 0, len(m.Items))
 	for _, p := range m.Items {
 		it := &MenuItem{Label: p.Label, Accelerator: p.Accelerator, Disabled: !p.Enabled, Hidden: !p.Visible, Checked: p.Checked}
+		if p.Icon != nil {
+			it.Icon = &MenuIcon{p.Icon}
+		}
 		switch p.Type {
 		case platform.MenuItemSeparator:
 			it.Type = MenuItemSeparator
@@ -150,7 +151,7 @@ func contentMenu(m *platform.Menu, chosen func(int)) []*MenuItem {
 // page runs fn with the native window, unless the window shows Content
 // and so has no page.
 func (w *Window) page(fn func(n platform.Window)) {
-	if w.content != nil {
+	if w.content {
 		return
 	}
 	w.do(fn)
@@ -158,7 +159,7 @@ func (w *Window) page(fn func(n platform.Window)) {
 
 // pageGet is page for functions returning a value.
 func pageGet[T any](w *Window, fn func(n platform.Window) T) T {
-	if w.content != nil {
+	if w.content {
 		var zero T
 		return zero
 	}
@@ -169,7 +170,7 @@ func pageGet[T any](w *Window, fn func(n platform.Window) T) T {
 // its user interface shows. It is safe from any goroutine; calls made
 // before the next frame make one frame. It does nothing for a web page.
 func (w *Window) Invalidate() {
-	if w.content == nil || !w.invalidating.CompareAndSwap(false, true) {
+	if !w.content || !w.invalidating.CompareAndSwap(false, true) {
 		return
 	}
 	postMain(func() {

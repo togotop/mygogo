@@ -609,6 +609,9 @@ func (w *window) message(m uint32, wp, lp uintptr) (uintptr, bool) {
 		}
 	case wmEnterMenuLoop:
 		w.inMenu = true
+		if w.surface != nil {
+			w.surface.liftKeys()
+		}
 	case wmExitMenuLoop:
 		w.inMenu = false
 	case wmMenuChar:
@@ -653,6 +656,7 @@ func (w *window) sized(kind uintptr) {
 	if w.vibrancy != "" && kind != sizeMinimized {
 		w.extendGlass(false)
 	}
+	was := w.state
 	switch kind {
 	case sizeMinimized:
 		if w.state != sizeMinimized {
@@ -676,6 +680,14 @@ func (w *window) sized(kind uintptr) {
 			w.h.Unmaximized()
 		}
 		w.state = sizeRestored
+	}
+	// Nothing of a minimized window shows (Surface.Occluded).
+	if s := w.surface; s != nil && (was == sizeMinimized) != (w.state == sizeMinimized) {
+		ev := platform.SurfaceEvent{Kind: platform.SurfaceShown}
+		if w.state == sizeMinimized {
+			ev.Kind = platform.SurfaceHidden
+		}
+		s.send(ev)
 	}
 	w.h.Resized()
 }
@@ -1169,7 +1181,14 @@ func (w *window) IsMaximized() bool {
 	return r != 0
 }
 
-func (w *window) Restore() { procShowWindow.Call(w.hwnd, swRestore) }
+// Restore brings a minimized window back, maximized again if it was.
+// SW_RESTORE would also take a visible window out of maximized, which
+// Restore leaves alone, as on macOS and Linux.
+func (w *window) Restore() {
+	if w.IsMinimized() {
+		procShowWindow.Call(w.hwnd, swRestore)
+	}
+}
 
 // SetFullScreen takes the window's frame and menu bar away, or gives them
 // back. Each step sizes the window again: it is laid out once, at the end.
@@ -1391,6 +1410,9 @@ func (w *window) SetVibrancy(material string) {
 	w.withWebView(w.applyWebViewBackground)
 	procInvalidateRect(w.hwnd)
 }
+
+// SetVibrancyTint does nothing: Windows' backdrops take no tint.
+func (w *window) SetVibrancyTint(*platform.Color) {}
 
 // extendGlass extends the frame where the material shows, behind the
 // page: over the whole client area, or nowhere without a material. With

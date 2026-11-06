@@ -155,6 +155,9 @@ type Backend struct {
 	// before. Main thread only.
 	StyleSheet      string
 	StyleSheetError error
+	// StartButtons and EndButtons are the desktop's window buttons that
+	// WindowButtons reports, as Linux's button layout gives them.
+	StartButtons, EndButtons []string
 	// notifications are the notifications shown and not yet removed, by
 	// id.
 	notifications map[string]*platform.Notification
@@ -717,28 +720,29 @@ func (w *Window) framesOnShow() {
 	}
 }
 
-func (w *Window) Hide()                      { w.mu.Lock(); w.visible = false; w.mu.Unlock() }
-func (w *Window) IsVisible() bool            { w.mu.Lock(); defer w.mu.Unlock(); return w.visible }
-func (w *Window) Focus()                     { w.H.Focused() }
-func (w *Window) Blur()                      { w.H.Blurred() }
-func (w *Window) IsFocused() bool            { w.mu.Lock(); defer w.mu.Unlock(); return w.focused }
-func (w *Window) Minimize()                  { w.mu.Lock(); w.minimized = true; w.mu.Unlock(); w.H.Minimized() }
-func (w *Window) IsMinimized() bool          { w.mu.Lock(); defer w.mu.Unlock(); return w.minimized }
-func (w *Window) Maximize()                  { w.mu.Lock(); w.maximized = true; w.mu.Unlock(); w.H.Maximized() }
-func (w *Window) Unmaximize()                { w.mu.Lock(); w.maximized = false; w.mu.Unlock(); w.H.Unmaximized() }
-func (w *Window) IsMaximized() bool          { w.mu.Lock(); defer w.mu.Unlock(); return w.maximized }
-func (w *Window) Restore()                   { w.mu.Lock(); w.minimized = false; w.mu.Unlock(); w.H.Restored() }
-func (w *Window) SetFullScreen(v bool)       { w.mu.Lock(); w.full = v; w.mu.Unlock() }
-func (w *Window) IsFullScreen() bool         { w.mu.Lock(); defer w.mu.Unlock(); return w.full }
-func (w *Window) Center()                    {}
-func (w *Window) SetOpacity(float64)         {}
-func (w *Window) Opacity() float64           { return 1 }
-func (w *Window) SetHasShadow(bool)          {}
-func (w *Window) HasShadow() bool            { return true }
-func (w *Window) SetIgnoreMouseEvents(bool)  {}
-func (w *Window) SetContentProtection(bool)  {}
-func (w *Window) SetVibrancy(string)         {}
-func (w *Window) SetActiveAppearance(v bool) { w.mu.Lock(); w.active = v; w.mu.Unlock() }
+func (w *Window) Hide()                           { w.mu.Lock(); w.visible = false; w.mu.Unlock() }
+func (w *Window) IsVisible() bool                 { w.mu.Lock(); defer w.mu.Unlock(); return w.visible }
+func (w *Window) Focus()                          { w.H.Focused() }
+func (w *Window) Blur()                           { w.H.Blurred() }
+func (w *Window) IsFocused() bool                 { w.mu.Lock(); defer w.mu.Unlock(); return w.focused }
+func (w *Window) Minimize()                       { w.mu.Lock(); w.minimized = true; w.mu.Unlock(); w.H.Minimized() }
+func (w *Window) IsMinimized() bool               { w.mu.Lock(); defer w.mu.Unlock(); return w.minimized }
+func (w *Window) Maximize()                       { w.mu.Lock(); w.maximized = true; w.mu.Unlock(); w.H.Maximized() }
+func (w *Window) Unmaximize()                     { w.mu.Lock(); w.maximized = false; w.mu.Unlock(); w.H.Unmaximized() }
+func (w *Window) IsMaximized() bool               { w.mu.Lock(); defer w.mu.Unlock(); return w.maximized }
+func (w *Window) Restore()                        { w.mu.Lock(); w.minimized = false; w.mu.Unlock(); w.H.Restored() }
+func (w *Window) SetFullScreen(v bool)            { w.mu.Lock(); w.full = v; w.mu.Unlock() }
+func (w *Window) IsFullScreen() bool              { w.mu.Lock(); defer w.mu.Unlock(); return w.full }
+func (w *Window) Center()                         {}
+func (w *Window) SetOpacity(float64)              {}
+func (w *Window) Opacity() float64                { return 1 }
+func (w *Window) SetHasShadow(bool)               {}
+func (w *Window) HasShadow() bool                 { return true }
+func (w *Window) SetIgnoreMouseEvents(bool)       {}
+func (w *Window) SetContentProtection(bool)       {}
+func (w *Window) SetVibrancy(string)              {}
+func (w *Window) SetVibrancyTint(*platform.Color) {}
+func (w *Window) SetActiveAppearance(v bool)      { w.mu.Lock(); w.active = v; w.mu.Unlock() }
 
 func (w *Window) SetWindowButtonsTheme(string) {}
 
@@ -1260,6 +1264,10 @@ func (screen) Displays() []platform.Display {
 	}}
 }
 func (screen) CursorPoint() platform.Point { return platform.Point{X: 10, Y: 20} }
+
+// WindowButtons returns StartButtons and EndButtons, as Linux's desktop
+// layout gives them (platform.WindowButtonsBackend).
+func (b *Backend) WindowButtons() (start, end []string) { return b.StartButtons, b.EndButtons }
 
 // SetStyleSheet loads css in place of the sheet before, as Linux's GTK
 // does (platform.StyleBackend).
