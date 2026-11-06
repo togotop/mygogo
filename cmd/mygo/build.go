@@ -196,14 +196,20 @@ func buildPlatforms(raw string) ([]string, error) {
 		if isWebPlatform(p) {
 			continue
 		}
+		// Phones are named "ios", "ios/simulator", "android" or "android/<abi>".
+		// The build loop dispatches them through mobilePlatform; they are not
+		// GOOS/GOARCH pairs, so check them before cutting on "/".
+		if _, ok := mobilePlatform(p); ok {
+			continue
+		}
 		goos, goarch, ok := strings.Cut(p, "/")
 		if !ok || goos == "" || goarch == "" || strings.Contains(goarch, "/") {
-			return nil, fmt.Errorf("invalid platform %q, want GOOS/GOARCH or web", p)
+			return nil, fmt.Errorf("invalid platform %q, want GOOS/GOARCH, mobile or web", p)
 		}
 		switch goos {
 		case "darwin", "linux", "windows":
 		default:
-			return nil, fmt.Errorf("unsupported build platform %q: use darwin, linux, windows or web", p)
+			return nil, fmt.Errorf("unsupported build platform %q: use darwin, linux, windows, ios, android or web", p)
 		}
 	}
 	return targets, nil
