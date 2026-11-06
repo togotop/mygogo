@@ -6,17 +6,18 @@ plugins {
 android {
     namespace = "dev.mygo"
     compileSdk = 36
+    buildToolsVersion = "36.0.0"
     defaultConfig {
         minSdk = 26
         consumerProguardFiles("consumer-rules.pro")
     }
     compileOptions {
-        sourceCompatibility = JavaVersion.VERSION_17
-        targetCompatibility = JavaVersion.VERSION_17
+        sourceCompatibility = JavaVersion.VERSION_21
+        targetCompatibility = JavaVersion.VERSION_21
     }
 }
 
-kotlin { jvmToolchain(17) }
+kotlin { jvmToolchain(21) }
 
 dependencies {
     implementation("androidx.core:core-ktx:1.16.0")

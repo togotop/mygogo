@@ -11,6 +11,7 @@ fun prop(name: String) = providers.gradleProperty(name).orNull
 android {
     namespace = "dev.mygo.app"
     compileSdk = 36
+    buildToolsVersion = "36.0.0"
     defaultConfig {
         applicationId = prop("mygoApplicationId") ?: "dev.mygo.app"
         minSdk = (prop("mygoMinSdk") ?: "26").toInt()
@@ -49,12 +50,12 @@ android {
     }
     packaging { jniLibs { useLegacyPackaging = false } }
     compileOptions {
-        sourceCompatibility = JavaVersion.VERSION_17
-        targetCompatibility = JavaVersion.VERSION_17
+        sourceCompatibility = JavaVersion.VERSION_21
+        targetCompatibility = JavaVersion.VERSION_21
     }
 }
 
-kotlin { jvmToolchain(17) }
+kotlin { jvmToolchain(21) }
 
 dependencies {
     implementation(project(":mygo"))
