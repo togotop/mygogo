@@ -13,12 +13,22 @@ import java.io.File
 object Resources {
     fun dir(c: Context) = File(c.filesDir, "mygo-resources")
 
+    /** The directory, when this version's assets are copied there already. */
+    fun current(c: Context): String? {
+        val dir = dir(c)
+        val stamp = File(dir, ".version")
+        if (!stamp.exists()) return null
+        val info = c.packageManager.getPackageInfo(c.packageName, 0)
+        val version = "${info.longVersionCode}-${info.lastUpdateTime}"
+        return if (stamp.readText() == version) dir.absolutePath else null
+    }
+
     fun extract(c: Context): String {
         val dir = dir(c)
+        current(c)?.let { return it }
         val info = c.packageManager.getPackageInfo(c.packageName, 0)
         val stamp = File(dir, ".version")
         val version = "${info.longVersionCode}-${info.lastUpdateTime}"
-        if (stamp.exists() && stamp.readText() == version) return dir.absolutePath
         dir.deleteRecursively()
         dir.mkdirs()
         copy(c, "resources", dir)

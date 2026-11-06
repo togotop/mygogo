@@ -145,19 +145,26 @@ object HostImpl : HostCalls {
             }
         }
         registerPlugins()
-        // The first launch of a version copies the app's resources, which may
-        // be many: off the UI thread, which Android watches. Events sent
-        // meanwhile wait for the backend.
+        // With this version's assets already in place Go starts right here:
+        // a thread and a post would add their wait before the app can draw.
+        // The first launch of a version copies the assets, which may be many,
+        // off the UI thread, which Android watches.
         val ctx = a.applicationContext
-        Thread {
-            val dir = Resources.extract(ctx)
-            // Not by a view's post: with no Activity, the root is in no window
-            // and would hold it until one comes.
-            android.os.Handler(android.os.Looper.getMainLooper()).post {
-                Os.setenv("MYGO_RESOURCES", dir, true)
-                MyGoNative.start()
-            }
-        }.start()
+        val ready = Resources.current(ctx)
+        if (ready != null) {
+            Os.setenv("MYGO_RESOURCES", ready, true)
+            MyGoNative.start()
+        } else {
+            Thread {
+                val dir = Resources.extract(ctx)
+                // Not by a view's post: with no Activity, the root is in no window
+                // and would hold it until one comes.
+                android.os.Handler(android.os.Looper.getMainLooper()).post {
+                    Os.setenv("MYGO_RESOURCES", dir, true)
+                    MyGoNative.start()
+                }
+            }.start()
+        }
     }
 
     fun themeColor(attr: Int): Int {
