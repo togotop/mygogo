@@ -399,6 +399,9 @@ type engine struct {
 	// value, which takes the press as it moves (dragMove), or 0.
 	pressDragger uint64
 	focused      uint64
+	// clearFocusPending says ClearFocus was asked for while this frame built,
+	// and the focus goes once it is built.
+	clearFocusPending bool
 	// texts are selectable paragraphs in build order; selection spans those
 	// of one Selectable container (textselection.go).
 	texts        []*state
@@ -951,6 +954,12 @@ func (rt *engine) runFrame() {
 	rt.text.EndFrame()
 	rt.settleKeys()
 	rt.regs, rt.nextRegs = rt.nextRegs, rt.regs
+	if rt.clearFocusPending {
+		// Asked for while the frame built, so that the elements it built
+		// saw one focus throughout.
+		rt.clearFocusPending = false
+		rt.clearFocus()
+	}
 	rt.updateTextInput()
 	rt.updateCursor()
 	if rt.access {
@@ -1091,6 +1100,19 @@ func (rt *engine) repaintNow() {
 		rt.repaintDue = time.Time{}
 		rt.host.requestFrame()
 	}
+}
+
+// clearFocus takes the keyboard from the element that has it, as a press on
+// nothing does: what was editing stops, and an on-screen keyboard hides.
+// Main thread only.
+func (rt *engine) clearFocus() {
+	if rt.focused == 0 {
+		return
+	}
+	rt.focused = 0
+	rt.clearFocusBindings()
+	rt.consumed = true
+	rt.requestFrame()
 }
 
 // surfaceFrame draws the frame the surface asked for: the last frame's
@@ -1685,6 +1707,7 @@ func (rt *engine) commitElement(e *node, clip Rect, hidden bool) {
 	s.webView = e.webView
 	s.role, s.focusHighlights = e.role, e.focusHighlights
 	s.input, s.caret, s.takesText, s.noIME = e.inputFn, e.caret, e.takesText, e.noIME
+	s.touchSelection = e.touchSelection
 	if s.observe = e.observeFn; s.observe != nil {
 		rt.observers++
 	}

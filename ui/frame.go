@@ -37,6 +37,20 @@ func (c *Context) build() *context {
 // Valid reports whether this context is building a view.
 func (c *Context) Valid() bool { return c.build() != nil }
 
+// ClearFocus takes the keyboard from whatever has it, as a press on nothing
+// does: the field stops editing, and an on-screen keyboard hides. It takes
+// effect after this frame, so that what the frame builds sees one focus
+// throughout.
+func (c *Context) ClearFocus() {
+	if c == nil {
+		return
+	}
+	if rt := c.services.owner.Value(); rt != nil && !rt.closed {
+		rt.clearFocusPending = true
+		rt.requestFrame()
+	}
+}
+
 // Invalidate requests a frame from any goroutine.
 func (c *Context) Invalidate() {
 	if c != nil {

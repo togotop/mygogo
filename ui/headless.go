@@ -909,6 +909,12 @@ func (t *Tester) PressButton(button int, x, y float32) {
 	t.send(platform.SurfaceEvent{Kind: platform.PointerDown, X: float64(x), Y: float64(y), Button: button})
 }
 
+// PressWith presses the primary button with mods held, as Shift and a drag
+// do, which a chart pans by.
+func (t *Tester) PressWith(mods Modifiers, x, y float32) {
+	t.send(platform.SurfaceEvent{Kind: platform.PointerDown, Button: 0, X: float64(x), Y: float64(y), Mods: platform.Modifiers(mods)})
+}
+
 // ReleaseButton releases the pointer's button at (x, y).
 func (t *Tester) ReleaseButton(button int, x, y float32) {
 	t.send(platform.SurfaceEvent{Kind: platform.PointerUp, X: float64(x), Y: float64(y), Button: button})
@@ -1010,7 +1016,13 @@ func (t *Tester) DropFiles(x, y float32, paths ...string) bool {
 // a mouse wheel does: a scroll container glides there over a moment,
 // which advancing the clock (Advance) shows.
 func (t *Tester) Wheel(x, y, dx, dy float32) {
-	t.send(platform.SurfaceEvent{Kind: platform.PointerScroll, X: float64(x), Y: float64(y), DX: float64(dx), DY: float64(dy)})
+	t.WheelWith(0, x, y, dx, dy)
+}
+
+// WheelWith scrolls by dx, dy DIPs with mods held, as Ctrl and a wheel do,
+// which a chart zooms by.
+func (t *Tester) WheelWith(mods Modifiers, x, y, dx, dy float32) {
+	t.send(platform.SurfaceEvent{Kind: platform.PointerScroll, X: float64(x), Y: float64(y), DX: float64(dx), DY: float64(dy), Mods: platform.Modifiers(mods)})
 }
 
 // Pinch zooms by scale with the pointer at (x, y), as pinching a touchpad

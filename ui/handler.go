@@ -67,6 +67,14 @@ const (
 	// with Ctrl held comes as InputZoom too, and a mouse wheel's notches
 	// as InputScroll with Ctrl in Mods.
 	InputZoom
+	// InputPointerCancel aborts a press taken by this handler, as the
+	// system does when it takes the pointer for a gesture of its own.
+	InputPointerCancel
+	// InputLongPress starts a stationary touch selection on an element that
+	// takes text itself (TouchSelection): the moves and the release that
+	// follow come to it as InputPointerMove and InputPointerUp, and the
+	// keyboard stays away.
+	InputLongPress
 )
 
 // InputEvent is input an element takes as it comes (HandleInput).
@@ -183,6 +191,15 @@ func (e *node) ObserveInput(fn func(ev InputEvent)) *node {
 // InputText and Compose events (HandleInput) bring the text.
 func (e *node) TextCaret(r Rect) *node {
 	e.caret, e.takesText = r, true
+	return e
+}
+
+// TouchSelection makes a finger held still on the element start a selection
+// of the text it takes itself (HandleInput with TextCaret): it hears
+// InputLongPress, then the finger's moves and its release, as a drag's, and
+// the keyboard does not open. A tap still focuses it as it would.
+func (e *node) TouchSelection() *node {
+	e.touchSelection = true
 	return e
 }
 

@@ -349,6 +349,9 @@ type Window struct {
 	// of the Content.
 	content      bool
 	conn         *surface.Conn
+	// uiContent is what Content drew, kept for what the app asks of it
+	// (ClearFocus). Main thread only.
+	uiContent Content
 	devTools     bool
 	invalidating atomic.Bool
 	// userScripts are the scripts the window's pages run at document

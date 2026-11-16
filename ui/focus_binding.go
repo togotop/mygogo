@@ -145,3 +145,16 @@ func (rt *engine) commitFocusBindings() {
 		f.committed = append(f.committed[:0], f.members...)
 	}
 }
+
+// clearFocusBindings reads the fields that held the focus as their zero, so
+// that a field cleared by ClearFocus asks for nothing until the app assigns
+// a value again. Main thread only.
+func (rt *engine) clearFocusBindings() {
+	for _, f := range rt.focusFields {
+		f.pending = false
+		if v := f.field.Interface(); v != f.zero {
+			f.field.Set(reflect.ValueOf(f.zero))
+			f.last, f.wanted = f.zero, f.zero
+		}
+	}
+}

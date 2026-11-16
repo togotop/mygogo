@@ -262,3 +262,62 @@ func (ed *editor) process(c *context, e *node) {
 		ed.drag(x, y)
 	}
 }
+
+// editorOf returns the editor a text input or text area builds, or nil for
+// any other element.
+func (e Element) editorOf() (*editor, *node) {
+	n := e.node()
+	if n == nil || n.st == nil {
+		return nil, nil
+	}
+	return n.st.editor, n
+}
+
+// CanUndo reports whether a text input or text area has an edit to take back.
+// It is false for other elements.
+func (e Element) CanUndo() bool {
+	ed, _ := e.editorOf()
+	return ed != nil && len(ed.undo) > 0
+}
+
+// CanRedo reports whether a text input or text area has an edit Undo took
+// back that can be put again.
+func (e Element) CanRedo() bool {
+	ed, _ := e.editorOf()
+	return ed != nil && len(ed.redo) > 0
+}
+
+// Undo takes back the last edit of a text input or text area, and reports
+// whether there was one. The bound string keeps what the edit left, as typing
+// does.
+func (e Element) Undo() bool {
+	ed, n := e.editorOf()
+	if ed == nil || len(ed.undo) == 0 {
+		return false
+	}
+	ed.takeBack(false)
+	if ed.client != nil {
+		ed.client.publish()
+	}
+	if n.c != nil {
+		n.c.rt.requestFrame()
+	}
+	return true
+}
+
+// Redo puts back the last edit Undo took back, and reports whether there was
+// one.
+func (e Element) Redo() bool {
+	ed, n := e.editorOf()
+	if ed == nil || len(ed.redo) == 0 {
+		return false
+	}
+	ed.takeBack(true)
+	if ed.client != nil {
+		ed.client.publish()
+	}
+	if n.c != nil {
+		n.c.rt.requestFrame()
+	}
+	return true
+}
