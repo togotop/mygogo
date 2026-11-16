@@ -18,6 +18,7 @@ subprojects {
     plugins.withId("com.android.library") {
         extensions.configure<com.android.build.gradle.LibraryExtension> {
             compileSdk = 36
+            buildToolsVersion = "36.0.0"
             defaultConfig {
                 minSdk = (providers.gradleProperty("mygoMinSdk").orNull ?: "26").toInt()
                 // C, which a module builds with externalNativeBuild, builds
@@ -34,8 +35,8 @@ subprojects {
                 cmake { buildStagingDirectory = rootProject.layout.buildDirectory.dir("native/$name/cxx").get().asFile }
             }
             compileOptions {
-                sourceCompatibility = JavaVersion.VERSION_17
-                targetCompatibility = JavaVersion.VERSION_17
+                sourceCompatibility = JavaVersion.VERSION_21
+                targetCompatibility = JavaVersion.VERSION_21
             }
         }
         dependencies {
@@ -44,6 +45,6 @@ subprojects {
         }
     }
     plugins.withId("org.jetbrains.kotlin.android") {
-        extensions.configure<org.jetbrains.kotlin.gradle.dsl.KotlinAndroidProjectExtension> { jvmToolchain(17) }
+        extensions.configure<org.jetbrains.kotlin.gradle.dsl.KotlinAndroidProjectExtension> { jvmToolchain(21) }
     }
 }
