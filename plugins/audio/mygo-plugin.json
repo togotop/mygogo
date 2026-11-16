@@ -1,0 +1,10 @@
+{
+  "mobile": {
+    "id": "audio",
+    "android": {
+      "sources": ["android/*.kt"],
+      "class": "AudioPlugin",
+      "permissions": ["ACCESS_NOTIFICATION_POLICY"]
+    }
+  }
+}

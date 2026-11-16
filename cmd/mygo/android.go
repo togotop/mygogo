@@ -237,6 +237,9 @@ func androidManifest(c *Config, plugins mobilePlugins) []byte {
 	for _, p := range perms {
 		fmt.Fprintf(&b, "    <uses-permission android:name=%q />\n", p)
 	}
+	for _, x := range plugins.manifestRoot() {
+		b.WriteString("    " + x + "\n")
+	}
 	theme := "Theme.MyGo"
 	if c.Android.Splash != "" {
 		theme = androidSplashTheme

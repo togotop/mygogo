@@ -1,0 +1,11 @@
+{
+  "mobile": {
+    "id": "device",
+    "android": {
+      "sources": [
+        "android/*.kt"
+      ],
+      "class": "DevicePlugin"
+    }
+  }
+}

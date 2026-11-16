@@ -1,0 +1,14 @@
+{
+  "mobile": {
+    "id": "netpath",
+    "android": {
+      "sources": [
+        "android/*.kt"
+      ],
+      "class": "NetPathPlugin",
+      "permissions": [
+        "ACCESS_NETWORK_STATE"
+      ]
+    }
+  }
+}
