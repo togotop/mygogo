@@ -773,6 +773,14 @@ class NetworkStatusReply(
     }
 }
 
+class MulticastLockCall(
+    @JvmField var on: Boolean = false,
+) {
+    constructor(r: WireReader) : this() {
+        on = r.bool()
+    }
+}
+
 class BatteryReply(
     @JvmField var level: Double = 0.0,
     @JvmField var charging: Boolean = false,
@@ -1299,6 +1307,8 @@ interface HostCalls {
     fun networkStatus(): NetworkStatusReply
     /** starts NetworkChanged */
     fun watchNetwork()
+    /** the Wi-Fi multicast lock the local network's discovery holds, or gives back */
+    fun multicastLock(c: MulticastLockCall)
     fun battery(): BatteryReply
     /** the icons of the system's bars ("auto", "light" or "dark"), and whether the bars hide */
     fun setSystemBars(c: SetSystemBarsCall)
@@ -1413,34 +1423,35 @@ fun dispatchCall(h: HostCalls, buf: ByteArray): ByteArray? {
         55 -> h.keepAwake(KeepAwakeCall(r))
         56 -> { h.networkStatus().encode(w); return w.toByteArray() }
         57 -> h.watchNetwork()
-        58 -> { h.battery().encode(w); return w.toByteArray() }
-        59 -> h.setSystemBars(SetSystemBarsCall(r))
-        60 -> h.setOrientations(SetOrientationsCall(r))
-        61 -> h.share(ShareCall(r))
-        62 -> h.saveFile(SaveFileCall(r))
-        63 -> { h.clipboardImage().encode(w); return w.toByteArray() }
-        64 -> h.setClipboardImage(SetClipboardImageCall(r))
-        65 -> h.popupMenu(PopupMenuCall(r))
-        66 -> h.setBarItems(SetBarItemsCall(r))
-        67 -> h.pluginCall(PluginCallCall(r))
-        68 -> { h.audioOpen(AudioOpenCall(r)).encode(w); return w.toByteArray() }
-        69 -> { h.audioWrite(AudioWriteCall(r)).encode(w); return w.toByteArray() }
-        70 -> { h.audioClose().encode(w); return w.toByteArray() }
-        71 -> h.haptic(HapticCall(r))
-        72 -> h.requestFrame(RequestFrameCall(r))
-        73 -> h.setTextInput(SetTextInputCall(r))
-        74 -> h.setCursor(SetCursorCall(r))
-        75 -> h.accessibilityChanged(AccessibilityChangedCall(r))
-        76 -> h.announce(AnnounceCall(r))
-        77 -> h.showMenu(ShowMenuCall(r))
-        78 -> h.setBackAvailable(SetBackAvailableCall(r))
-        79 -> h.showMagnifier(ShowMagnifierCall(r))
-        80 -> h.hideMagnifier(HideMagnifierCall(r))
-        81 -> { h.textMetrics(TextMetricsCall(r)).encode(w); return w.toByteArray() }
-        82 -> { h.measureText(MeasureTextCall(r)).encode(w); return w.toByteArray() }
-        83 -> { h.textAdvances(TextAdvancesCall(r)).encode(w); return w.toByteArray() }
-        84 -> { h.drawText(DrawTextCall(r)).encode(w); return w.toByteArray() }
-        85 -> { h.registerFont(RegisterFontCall(r)).encode(w); return w.toByteArray() }
+        58 -> h.multicastLock(MulticastLockCall(r))
+        59 -> { h.battery().encode(w); return w.toByteArray() }
+        60 -> h.setSystemBars(SetSystemBarsCall(r))
+        61 -> h.setOrientations(SetOrientationsCall(r))
+        62 -> h.share(ShareCall(r))
+        63 -> h.saveFile(SaveFileCall(r))
+        64 -> { h.clipboardImage().encode(w); return w.toByteArray() }
+        65 -> h.setClipboardImage(SetClipboardImageCall(r))
+        66 -> h.popupMenu(PopupMenuCall(r))
+        67 -> h.setBarItems(SetBarItemsCall(r))
+        68 -> h.pluginCall(PluginCallCall(r))
+        69 -> { h.audioOpen(AudioOpenCall(r)).encode(w); return w.toByteArray() }
+        70 -> { h.audioWrite(AudioWriteCall(r)).encode(w); return w.toByteArray() }
+        71 -> { h.audioClose().encode(w); return w.toByteArray() }
+        72 -> h.haptic(HapticCall(r))
+        73 -> h.requestFrame(RequestFrameCall(r))
+        74 -> h.setTextInput(SetTextInputCall(r))
+        75 -> h.setCursor(SetCursorCall(r))
+        76 -> h.accessibilityChanged(AccessibilityChangedCall(r))
+        77 -> h.announce(AnnounceCall(r))
+        78 -> h.showMenu(ShowMenuCall(r))
+        79 -> h.setBackAvailable(SetBackAvailableCall(r))
+        80 -> h.showMagnifier(ShowMagnifierCall(r))
+        81 -> h.hideMagnifier(HideMagnifierCall(r))
+        82 -> { h.textMetrics(TextMetricsCall(r)).encode(w); return w.toByteArray() }
+        83 -> { h.measureText(MeasureTextCall(r)).encode(w); return w.toByteArray() }
+        84 -> { h.textAdvances(TextAdvancesCall(r)).encode(w); return w.toByteArray() }
+        85 -> { h.drawText(DrawTextCall(r)).encode(w); return w.toByteArray() }
+        86 -> { h.registerFont(RegisterFontCall(r)).encode(w); return w.toByteArray() }
     }
     return null
 }

@@ -456,6 +456,9 @@ final class Host: NSObject, HostCalls, UNUserNotificationCenterDelegate, UIDocum
         _ = monitor()
     }
 
+    /// iOS's Wi-Fi keeps multicast for the app: nothing to hold.
+    func multicastLock(_ c: MulticastLockCall) {}
+
     func battery() -> BatteryReply {
         let d = UIDevice.current
         d.isBatteryMonitoringEnabled = true

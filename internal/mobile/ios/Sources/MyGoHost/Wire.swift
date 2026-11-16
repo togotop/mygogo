@@ -753,6 +753,14 @@ public struct NetworkStatusReply {
     }
 }
 
+public struct MulticastLockCall {
+    public var on: Bool = false
+    public init() {}
+    init(_ r: inout WireReader) {
+        on = r.bool()
+    }
+}
+
 public struct BatteryReply {
     public var level: Double = 0
     public var charging: Bool = false
@@ -1280,6 +1288,8 @@ public protocol HostCalls: AnyObject {
     func networkStatus() -> NetworkStatusReply
     /// starts NetworkChanged
     func watchNetwork()
+    /// the Wi-Fi multicast lock the local network's discovery holds, or gives back
+    func multicastLock(_ c: MulticastLockCall)
     func battery() -> BatteryReply
     /// the icons of the system's bars ("auto", "light" or "dark"), and whether the bars hide
     func setSystemBars(_ c: SetSystemBarsCall)
@@ -1509,87 +1519,90 @@ public func dispatchCall(_ h: HostCalls, _ buf: UnsafeRawBufferPointer) -> [UInt
         h.watchNetwork()
         return nil
     case 58:
+        h.multicastLock(MulticastLockCall(&r))
+        return nil
+    case 59:
         h.battery().encode(&w)
         return w.buf
-    case 59:
+    case 60:
         h.setSystemBars(SetSystemBarsCall(&r))
         return nil
-    case 60:
+    case 61:
         h.setOrientations(SetOrientationsCall(&r))
         return nil
-    case 61:
+    case 62:
         h.share(ShareCall(&r))
         return nil
-    case 62:
+    case 63:
         h.saveFile(SaveFileCall(&r))
         return nil
-    case 63:
+    case 64:
         h.clipboardImage().encode(&w)
         return w.buf
-    case 64:
+    case 65:
         h.setClipboardImage(SetClipboardImageCall(&r))
         return nil
-    case 65:
+    case 66:
         h.popupMenu(PopupMenuCall(&r))
         return nil
-    case 66:
+    case 67:
         h.setBarItems(SetBarItemsCall(&r))
         return nil
-    case 67:
+    case 68:
         h.pluginCall(PluginCallCall(&r))
         return nil
-    case 68:
+    case 69:
         h.audioOpen(AudioOpenCall(&r)).encode(&w)
         return w.buf
-    case 69:
+    case 70:
         h.audioWrite(AudioWriteCall(&r)).encode(&w)
         return w.buf
-    case 70:
+    case 71:
         h.audioClose().encode(&w)
         return w.buf
-    case 71:
+    case 72:
         h.haptic(HapticCall(&r))
         return nil
-    case 72:
+    case 73:
         h.requestFrame(RequestFrameCall(&r))
         return nil
-    case 73:
+    case 74:
         h.setTextInput(SetTextInputCall(&r))
         return nil
-    case 74:
+    case 75:
         h.setCursor(SetCursorCall(&r))
         return nil
-    case 75:
+    case 76:
         h.accessibilityChanged(AccessibilityChangedCall(&r))
         return nil
-    case 76:
+    case 77:
         h.announce(AnnounceCall(&r))
         return nil
-    case 77:
+    case 78:
         h.showMenu(ShowMenuCall(&r))
         return nil
-    case 78:
+    case 79:
         h.setBackAvailable(SetBackAvailableCall(&r))
         return nil
-    case 79:
+    case 80:
         h.showMagnifier(ShowMagnifierCall(&r))
         return nil
-    case 80:
+    case 81:
         h.hideMagnifier(HideMagnifierCall(&r))
         return nil
-    case 81:
+    case 82:
         h.textMetrics(TextMetricsCall(&r)).encode(&w)
         return w.buf
-    case 82:
+    case 83:
         h.measureText(MeasureTextCall(&r)).encode(&w)
         return w.buf
-    case 83:
+    case 84:
         h.textAdvances(TextAdvancesCall(&r)).encode(&w)
         return w.buf
-    case 84:
+    case 85:
         h.drawText(DrawTextCall(&r)).encode(&w)
         return w.buf
-    case 85:
+    case 86:
         h.registerFont(RegisterFontCall(&r)).encode(&w)
         return w.buf
     default:

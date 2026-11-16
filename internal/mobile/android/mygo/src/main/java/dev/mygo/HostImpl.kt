@@ -23,6 +23,7 @@ import android.net.ConnectivityManager
 import android.net.Network
 import android.net.NetworkCapabilities
 import android.net.Uri
+import android.net.wifi.WifiManager
 import android.os.BatteryManager
 import android.os.Build
 import android.os.PowerManager
@@ -635,6 +636,20 @@ object HostImpl : HostCalls {
     }
 
     override fun networkStatus(): NetworkStatusReply = networkReply()
+
+    /** The Wi-Fi multicast lock: a phone filters what the local network announces unless the app holds it. */
+    private var multicastLock: WifiManager.MulticastLock? = null
+
+    override fun multicastLock(c: MulticastLockCall) {
+        if (c.on) {
+            if (multicastLock != null) return
+            val wifi = app.applicationContext.getSystemService(Context.WIFI_SERVICE) as? WifiManager
+            multicastLock = wifi?.createMulticastLock("mygo")?.apply { setReferenceCounted(false); acquire() }
+        } else {
+            multicastLock?.release()
+            multicastLock = null
+        }
+    }
 
     override fun watchNetwork() {
         if (watchingNetwork) return

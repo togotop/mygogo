@@ -116,6 +116,7 @@ var calls = []msg{
 	{name: "KeepAwake", doc: "keeps the screen on while the app shows", args: []field{f("On", "bool")}},
 	{name: "NetworkStatus", wait: true, reply: []field{f("Online", "bool"), f("Metered", "bool")}},
 	{name: "WatchNetwork", doc: "starts NetworkChanged"},
+	{name: "MulticastLock", doc: "the Wi-Fi multicast lock the local network's discovery holds, or gives back", args: []field{f("On", "bool")}},
 	{name: "Battery", wait: true, reply: []field{f("Level", "float"), f("Charging", "bool"), f("LowPower", "bool")}},
 	{name: "SetSystemBars", doc: `the icons of the system's bars ("auto", "light" or "dark"), and whether the bars hide`,
 		args: []field{f("Style", "string"), f("Hidden", "bool")}},

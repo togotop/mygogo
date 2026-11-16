@@ -61,34 +61,35 @@ const (
 	CallKeepAwake              = 55
 	CallNetworkStatus          = 56
 	CallWatchNetwork           = 57
-	CallBattery                = 58
-	CallSetSystemBars          = 59
-	CallSetOrientations        = 60
-	CallShare                  = 61
-	CallSaveFile               = 62
-	CallClipboardImage         = 63
-	CallSetClipboardImage      = 64
-	CallPopupMenu              = 65
-	CallSetBarItems            = 66
-	CallPluginCall             = 67
-	CallAudioOpen              = 68
-	CallAudioWrite             = 69
-	CallAudioClose             = 70
-	CallHaptic                 = 71
-	CallRequestFrame           = 72
-	CallSetTextInput           = 73
-	CallSetCursor              = 74
-	CallAccessibilityChanged   = 75
-	CallAnnounce               = 76
-	CallShowMenu               = 77
-	CallSetBackAvailable       = 78
-	CallShowMagnifier          = 79
-	CallHideMagnifier          = 80
-	CallTextMetrics            = 81
-	CallMeasureText            = 82
-	CallTextAdvances           = 83
-	CallDrawText               = 84
-	CallRegisterFont           = 85
+	CallMulticastLock          = 58
+	CallBattery                = 59
+	CallSetSystemBars          = 60
+	CallSetOrientations        = 61
+	CallShare                  = 62
+	CallSaveFile               = 63
+	CallClipboardImage         = 64
+	CallSetClipboardImage      = 65
+	CallPopupMenu              = 66
+	CallSetBarItems            = 67
+	CallPluginCall             = 68
+	CallAudioOpen              = 69
+	CallAudioWrite             = 70
+	CallAudioClose             = 71
+	CallHaptic                 = 72
+	CallRequestFrame           = 73
+	CallSetTextInput           = 74
+	CallSetCursor              = 75
+	CallAccessibilityChanged   = 76
+	CallAnnounce               = 77
+	CallShowMenu               = 78
+	CallSetBackAvailable       = 79
+	CallShowMagnifier          = 80
+	CallHideMagnifier          = 81
+	CallTextMetrics            = 82
+	CallMeasureText            = 83
+	CallTextAdvances           = 84
+	CallDrawText               = 85
+	CallRegisterFont           = 86
 )
 
 // Numbers of events.
@@ -1144,6 +1145,19 @@ func (m *WatchNetwork) Encode(w *Writer) {
 
 // Wait reports whether the caller waits for the host to run it.
 func (*WatchNetwork) Wait() bool { return false }
+
+// MulticastLock is the Wi-Fi multicast lock the local network's discovery holds, or gives back.
+type MulticastLock struct {
+	On bool
+}
+
+func (m *MulticastLock) Encode(w *Writer) {
+	w.Uvarint(CallMulticastLock)
+	w.Bool(m.On)
+}
+
+// Wait reports whether the caller waits for the host to run it.
+func (*MulticastLock) Wait() bool { return false }
 
 type Battery struct {
 }

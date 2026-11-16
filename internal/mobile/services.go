@@ -300,6 +300,10 @@ func (n network) Status() platform.NetworkStatus {
 	return platform.NetworkStatus{Online: r.Online, Metered: r.Metered}
 }
 
+// MulticastLock asks the host for the Wi-Fi multicast lock, or gives it back:
+// a phone filters what the local network announces unless the app holds it.
+func (b *Backend) MulticastLock(on bool) { b.call(&wire.MulticastLock{On: on}, nil) }
+
 type secrets struct {
 	unsupported.Secrets
 	b *Backend

@@ -8,6 +8,7 @@ require (
 	github.com/hajimehoshi/go-mp3 v0.3.4
 	github.com/jfreymuth/oggvorbis v1.0.5
 	github.com/mewkiz/flac v1.0.14
+	github.com/miekg/dns v1.1.62
 	github.com/tphakala/go-aac v0.7.1
 	go.digitalxero.dev/rpm v0.3.4
 	golang.org/x/image v0.46.0
@@ -26,5 +27,8 @@ require (
 	github.com/tphakala/simd v1.11.0 // indirect
 	github.com/ulikunitz/xz v0.5.15 // indirect
 	golang.org/x/crypto v0.57.0 // indirect
+	golang.org/x/mod v0.41.0 // indirect
+	golang.org/x/sync v0.24.0 // indirect
 	golang.org/x/sys v0.48.0 // indirect
+	golang.org/x/tools v0.51.0 // indirect
 )

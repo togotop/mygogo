@@ -92,6 +92,10 @@ type Application struct {
 	onActivate        listeners[func(bool)]
 	onDidBecomeActive listeners[func()]
 	onDidResignActive listeners[func()]
+	// lifecycle is the latest LifecycleState, and its listeners hear it
+	// change.
+	lifecycle          LifecycleState
+	onLifecycleChanged listeners[func(LifecycleState)]
 	onOpenURL         listeners[func(string)]
 	onOpenFile        listeners[func(string)]
 	onWindowCreated   listeners[func(*Window)]
@@ -779,9 +783,13 @@ func (appHandler) Activated(visible bool) {
 }
 func (appHandler) DidBecomeActive() {
 	backgroundShow = false
+	App.setLifecycle(LifecycleActive)
 	fire(&App.onDidBecomeActive)
 }
-func (appHandler) DidResignActive() { fire(&App.onDidResignActive) }
+func (appHandler) DidResignActive() {
+	App.setLifecycle(LifecycleInactive)
+	fire(&App.onDidResignActive)
+}
 func (appHandler) OpenURLs(urls []string) {
 	for _, u := range urls {
 		fire1(&App.onOpenURL, u)
