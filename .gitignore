@@ -13,3 +13,6 @@ benchmarks/*/target/
 # What Zig 0.16 fetches into the packages of native libraries.
 zig-pkg/
 .zig-cache/
+
+# What a device build fetches for HarfBuzz.
+third_party/
