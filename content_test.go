@@ -674,3 +674,23 @@ func TestBackgroundShowsWindowsInactive(t *testing.T) {
 		}
 	}
 }
+
+// TestWindowClearFocusConnect checks that a window showing Content wires its
+// surface's ClearFocus, which is how Window.ClearFocus reaches the content
+// without the window keeping it alive (TestContentClosedWindowLetsItsBitmapsGo).
+func TestWindowClearFocusConnect(t *testing.T) {
+	w := NewWindow(WindowOptions{Width: 300, Height: 200, Content: ui.View(func(c *ui.Context) {
+		ui.Box(c).Fill()
+	})})
+	t.Cleanup(w.Destroy)
+	s := fb.Windows()[len(fb.Windows())-1].FakeSurface()
+	onMain(func() { s.Frame() })
+	var wired bool
+	onMain(func() { wired = w.conn != nil && w.conn.ClearFocus != nil })
+	if !wired {
+		t.Fatal("the surface of a window with Content has no ClearFocus")
+	}
+	// It does nothing when nothing has the focus.
+	w.ClearFocus()
+	onMain(func() {})
+}

@@ -395,6 +395,7 @@ var elementChains = map[string]bool{
 	"Tooltip":              true,
 	"Top":                  true,
 	"TopPercent":           true,
+	"TouchSelection":       true,
 	"TrackLines":           true,
 	"TrackScroll":          true,
 	"Transform":            true,

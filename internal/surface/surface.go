@@ -117,6 +117,9 @@ type Conn struct {
 	// ToggleDevTools opens or closes the content's inspector, for the
 	// Toggle Developer Tools menu item, when DevTools is set.
 	ToggleDevTools func()
+	// ClearFocus takes the keyboard from what the content's user interface
+	// has focused, as a press on nothing does.
+	ClearFocus func()
 	// Detach is called once the window is closed.
 	Detach func()
 }

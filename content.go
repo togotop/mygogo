@@ -30,11 +30,8 @@ type Content interface {
 // whose page keeps its own focus.
 func (w *Window) ClearFocus() {
 	onMain(func() {
-		if w.conn == nil {
-			return
-		}
-		if c, ok := w.uiContent.(interface{ ClearFocus(*surface.Conn) }); ok {
-			c.ClearFocus(w.conn)
+		if w.conn != nil && w.conn.ClearFocus != nil {
+			w.conn.ClearFocus()
 		}
 	})
 }
@@ -46,7 +43,6 @@ func (w *Window) attachContent(content Content) {
 	if s == nil {
 		panic("mygo: the backend " + backend().Name() + " created no surface for the window's Content")
 	}
-	w.uiContent = content
 	w.conn = &surface.Conn{
 		Surface:        s,
 		Window:         w,
