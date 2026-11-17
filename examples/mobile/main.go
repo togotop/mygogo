@@ -16,15 +16,22 @@ import (
 
 	"github.com/egoist/mygo"
 	"github.com/egoist/mygo/audio"
+	audioplugin "github.com/egoist/mygo/plugins/audio"
 	"github.com/egoist/mygo/plugins/background"
 	"github.com/egoist/mygo/plugins/biometrics"
+	bluetoothplugin "github.com/egoist/mygo/plugins/bluetooth"
 	"github.com/egoist/mygo/plugins/camera"
+	deviceplugin "github.com/egoist/mygo/plugins/device"
 	"github.com/egoist/mygo/plugins/imagepicker"
 	"github.com/egoist/mygo/plugins/location"
 	"github.com/egoist/mygo/plugins/maps"
+	netpathplugin "github.com/egoist/mygo/plugins/netpath"
+	nfcplugin "github.com/egoist/mygo/plugins/nfc"
 	"github.com/egoist/mygo/plugins/permissionflow"
 	"github.com/egoist/mygo/plugins/preferences"
+	scannerplugin "github.com/egoist/mygo/plugins/scanner"
 	"github.com/egoist/mygo/plugins/sensors"
+	speechplugin "github.com/egoist/mygo/plugins/speech"
 	"github.com/egoist/mygo/plugins/sqlite"
 	"github.com/egoist/mygo/plugins/videoplayer"
 	"github.com/egoist/mygo/ui"
@@ -551,6 +558,68 @@ func (a *app) system(c *ui.Context) {
 						return err.Error()
 					}
 					return fmt.Sprintf("%d, kept between runs", n)
+				})
+			})
+			mobile.Section(c, "Plugins of the phone's radios", func() {
+				row := func(title string, run func(ctx context.Context) string) {
+					if mobile.ListRow(c.Key(title), mobile.RowOptions{Title: title, Subtitle: a.results[title]}).Clicked() {
+						go func() {
+							s := run(context.Background())
+							a.win.Update(func() { a.results[title] = s })
+						}()
+					}
+				}
+				// Available asks the host whether the radio is there, which is
+				// a call and its reply across the wire; the rest asks for what
+				// it reads now.
+				row("NFC", func(ctx context.Context) string {
+					ok, err := nfcplugin.Available(ctx)
+					if err != nil {
+						return err.Error()
+					}
+					return fmt.Sprintf("available %v", ok)
+				})
+				row("Bluetooth LE", func(ctx context.Context) string {
+					ok, err := bluetoothplugin.Available(ctx)
+					if err != nil {
+						return err.Error()
+					}
+					return fmt.Sprintf("available %v", ok)
+				})
+				row("Media volume", func(ctx context.Context) string {
+					v, err := audioplugin.Current(ctx)
+					if err != nil {
+						return err.Error()
+					}
+					return fmt.Sprintf("%d%%, ringer %v, muted %v", v.Percent, v.Ringer, v.Muted)
+				})
+				row("The device", func(ctx context.Context) string {
+					d, err := deviceplugin.Current(ctx)
+					if err != nil {
+						return err.Error()
+					}
+					return fmt.Sprintf("%v %v, %v", d.Manufacturer, d.Model, d.SystemVersion)
+				})
+				row("How it reaches the network", func(ctx context.Context) string {
+					p, err := netpathplugin.Current(ctx)
+					if err != nil {
+						return err.Error()
+					}
+					return fmt.Sprintf("%v, online %v, expensive %v", p.Interface, p.Online, p.Expensive)
+				})
+				row("A code in a photo", func(ctx context.Context) string {
+					ok, err := scannerplugin.Available(ctx)
+					if err != nil {
+						return err.Error()
+					}
+					return fmt.Sprintf("available %v", ok)
+				})
+				row("Say it", func(ctx context.Context) string {
+					ok, err := speechplugin.Available(ctx)
+					if err != nil {
+						return err.Error()
+					}
+					return fmt.Sprintf("available %v", ok)
 				})
 			})
 			ui.Text(c, "Native UI, drawn by MyGo.").FontSize(13).TextColor(t.TextMuted).PaddingX(16)
